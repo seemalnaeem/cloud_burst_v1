@@ -1,0 +1,156 @@
+/*
+  Design tokens. Transcribed from COLOR_SCHEMES.md, which is the source of
+  truth for UI color.
+
+  Light is the default on :root. Dark redeclares the same names under
+  :root[data-theme="dark"]. Components read the tokens, so switching the
+  attribute re-themes the whole portal with no markup change.
+
+  These are UI chrome. Map and legend colors are DATA and live in
+  shared/contracts/palettes.json, because a Very High risk district is #d7191c
+  whatever theme the surrounding panel is in.
+*/
+
+:root {
+  /* Surfaces */
+  --cb-bg: #eef1f6;
+  --cb-bg-2: #e7ebf2;
+  --cb-panel: #ffffff;
+  --cb-panel-2: #f7f9fc;
+  --cb-panel-3: #f1f4f9;
+  --cb-track: rgba(20, 45, 38, 0.16);
+
+  /* Text */
+  --cb-text: #256354;
+  --cb-text-2: #5b6672;
+  --cb-muted: #8a94a1;
+
+  /* Borders */
+  --cb-border: #e4e8ef;
+  --cb-border-strong: #d6dce6;
+
+  /* Brand. The primary shifts hue between themes, teal reads as premium on
+     light surfaces but loses contrast on near black. */
+  --cb-primary: #256354;
+  --cb-primary-soft: #eaf1fd;
+  --cb-primary-border: #cfe0ff;
+  --cb-chip: #eaf0fb;
+  --cb-chip-text: #33517d;
+  --cb-header: #256354;
+  --cb-header-2: #171b22;
+
+  /* Brand teal family */
+  --cb-teal: #256354;
+  --cb-teal-accent: #3d8d7a;
+  --cb-cream: #fbffe4;
+
+  /* Status. Every one is a triplet: saturated base for text and icons, a soft
+     fill, and a matching border. */
+  --cb-danger: #d64541;
+  --cb-danger-soft: #fdecec;
+  --cb-danger-border: #f2c4c2;
+  --cb-amber: #c17d18;
+  --cb-amber-soft: #fdf3e3;
+  --cb-amber-border: #f0d3a0;
+  --cb-green: #3f9d55;
+  --cb-green-soft: #eef7ee;
+  --cb-green-border: #cfe8d4;
+
+  /* Controls */
+  --cb-toggle-off: #c7ced6;
+  --cb-btn-dark: #141922;
+  --cb-btn-dark-text: #ffffff;
+
+  /* Stat card accents */
+  --cb-accent-rain: #2a80d1;
+  --cb-accent-pwat: #6366f1;
+  --cb-accent-elev: #0284c7;
+
+  /* Elevation. Cool navy at low alpha on light. */
+  --cb-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.05);
+  --cb-shadow-lg: 0 8px 30px rgba(16, 24, 40, 0.12), 0 2px 8px rgba(16, 24, 40, 0.06);
+
+  /* Shape and type, identical in both themes */
+  --cb-radius: 16px;
+  --cb-radius-sm: 10px;
+  /* 'Inter Variable' is the family name the @fontsource-variable package
+     registers; plain 'Inter' follows for anyone who has it installed locally,
+     then the system stack as a last resort. */
+  --cb-font: 'Inter Variable', 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+
+  /* Fixed in both themes on purpose. The header pill and its cream text stay
+     constant for brand recognition, and alert red stays alert red. Do not
+     "fix" these for dark mode. */
+  --cb-alert: #b91c1c;
+  --cb-alert-bright: #dc2626;
+  --cb-alert-hover: #a31616;
+  --cb-on-brand: #fbffe4;
+  --cb-on-dark: #ffffff;
+
+  /* Header pill internals. Fixed because the pill background is the constant
+     brand teal in both themes, so anything sitting on it has to be constant
+     too. */
+  --cb-header-border: rgba(255, 255, 255, 0.06);
+  --cb-header-text: #f5f7ee;
+  --cb-header-pill-text: #d7dde6;
+  --cb-header-pill-bg: rgba(255, 255, 255, 0.08);
+  --cb-header-pill-border: rgba(255, 255, 255, 0.1);
+
+  /* Toggle knob, white on both the teal-accent "on" track and the grey "off"
+     track. */
+  --cb-knob: #ffffff;
+  --cb-knob-shadow: 0 1px 3px rgba(16, 24, 40, 0.25);
+}
+
+:root[data-theme='dark'] {
+  --cb-bg: #0c0f16;
+  --cb-bg-2: #10141d;
+  --cb-panel: #171c26;
+  --cb-panel-2: #1d2330;
+  --cb-panel-3: #232a39;
+  --cb-track: rgba(255, 255, 255, 0.16);
+
+  --cb-text: #eef2f7;
+  --cb-text-2: #b6bfcd;
+  --cb-muted: #97a2b1;
+
+  --cb-border: #2a3240;
+  --cb-border-strong: #3a4557;
+
+  /* Teal drops below usable contrast on these surfaces, so the interactive
+     primary becomes blue. */
+  --cb-primary: #5b8bff;
+  --cb-primary-soft: #17233d;
+  --cb-primary-border: #2d4372;
+  --cb-chip: #1a2740;
+  --cb-chip-text: #9fbcf0;
+  --cb-header: #256354;
+  --cb-header-2: #12161f;
+
+  --cb-teal: #256354;
+  --cb-teal-accent: #3d8d7a;
+  --cb-teal-on-dark: #6fb9a6;
+
+  --cb-danger: #f0736e;
+  --cb-danger-soft: #34201f;
+  --cb-danger-border: #5c3230;
+  --cb-amber: #e2a54c;
+  --cb-amber-soft: #33280f;
+  --cb-amber-border: #56421d;
+  --cb-green: #57bd6f;
+  --cb-green-soft: #16281a;
+  --cb-green-border: #2c4a33;
+
+  --cb-toggle-off: #3a4557;
+  --cb-btn-dark: #2f6bff;
+  --cb-btn-dark-text: #ffffff;
+
+  /* Lightened and desaturated so bold numbers stay legible on dark cards. */
+  --cb-accent-rain: #6ba3e0;
+  --cb-accent-pwat: #9ea4f0;
+  --cb-accent-elev: #58b0e0;
+
+  /* Pure black at higher alpha, needed for separation on near black surfaces. */
+  --cb-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --cb-shadow-lg: 0 10px 34px rgba(0, 0, 0, 0.5), 0 2px 10px rgba(0, 0, 0, 0.35);
+}

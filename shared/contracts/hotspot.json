@@ -1,0 +1,31 @@
+{
+  "$comment": "Strict hotspot mask. All 13 conditions are combined with logical AND, then self-masked so only true pixels render. Values from DATA_SOURCES.md section 9.2. These are the in-code values. The old prose comments claimed 60 mm/hr and 40 km/hr and were wrong, see section 12.",
+  "version": 1,
+  "combine": "AND",
+  "selfMask": true,
+  "methodologyKey": "hotspots_v3",
+  "conditions": [
+    {
+      "key": "rain",
+      "label": "Rain type and rate",
+      "$comment": "One condition here. Susceptibility splits this into two.",
+      "all": [
+        { "band": "precipitation_type_sfc", "op": "eq", "value": 1 },
+        { "band": "total_precipitation_sfc_hourly", "op": "gt", "value": 40, "unit": "mm/hr" }
+      ]
+    },
+    { "key": "cape",  "label": "CAPE",        "band": "most_unstable_cape_sfc",        "op": "gt",  "value": 1000,  "unit": "J/kg" },
+    { "key": "vv700", "label": "VV 700 hPa",  "band": "vertical_velocity_pl700",       "op": "lte", "value": -0.02, "unit": "Pa/s" },
+    { "key": "vv500", "label": "VV 500 hPa",  "band": "vertical_velocity_pl500",       "op": "lte", "value": -0.05, "unit": "Pa/s" },
+    { "key": "rh700", "label": "RH 700 hPa",  "band": "relative_humidity_pl700",       "op": "gt",  "value": 60,    "unit": "%" },
+    { "key": "rh500", "label": "RH 500 hPa",  "band": "relative_humidity_pl500",       "op": "gt",  "value": 50,    "unit": "%" },
+    { "key": "ws850", "label": "Wind 850 hPa","band": "wind_speed_pl850",              "op": "gt",  "value": 20,    "unit": "km/hr" },
+    { "key": "pw",    "label": "Precip. Water","band": "total_column_water_vapour_sfc","op": "gt",  "value": 35,    "unit": "mm" },
+    { "key": "t2m",   "label": "Temp 2m",     "band": "temperature_2m_sfc",            "op": "gt",  "value": 20,    "unit": "degC" },
+    { "key": "td2m",  "label": "Dewpoint 2m", "band": "dewpoint_temperature_2m_sfc",   "op": "gt",  "value": 15,    "unit": "degC" },
+    { "key": "t850",  "label": "Temp 850 hPa","band": "temperature_pl850",             "op": "gt",  "value": 10,    "unit": "degC" },
+    { "key": "elev",  "label": "Elevation",   "band": "elevation",                     "op": "gt",  "value": 1000,  "unit": "m" },
+    { "key": "slope", "label": "Slope",       "band": "slope",                         "op": "gte", "value": 15,    "unit": "deg" }
+  ],
+  "render": { "min": 0, "max": 1, "palette": ["#ff0000"] }
+}

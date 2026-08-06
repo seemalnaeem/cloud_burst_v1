@@ -1,0 +1,35 @@
+{
+  "$comment": "District susceptibility. Build a binary raster per condition, take the MEAN over the district which is the fraction of area passing, and count the condition as passed when that fraction reaches areaFractionThreshold. Values from DATA_SOURCES.md section 9.3. Uniformly stricter than the hotspot mask, deliberately.",
+  "version": 1,
+  "areaFractionThreshold": 0.5,
+  "reducer": "mean",
+  "maxScore": 13,
+  "conditions": [
+    { "key": "rain_type",   "label": "Precipitation type is rain", "band": "precipitation_type_sfc",         "op": "eq",  "value": 1 },
+    { "key": "rain_100mm",  "label": "Rain rate",                  "band": "total_precipitation_sfc_hourly", "op": "gte", "value": 100,  "unit": "mm/hr" },
+    { "key": "cape_1500",   "label": "CAPE",                       "band": "most_unstable_cape_sfc",         "op": "gt",  "value": 1500, "unit": "J/kg" },
+    { "key": "vv700",       "label": "VV 700 hPa",                 "band": "vertical_velocity_pl700",        "op": "lte", "value": -0.2, "unit": "Pa/s" },
+    { "key": "vv500",       "label": "VV 500 hPa",                 "band": "vertical_velocity_pl500",        "op": "lte", "value": -0.3, "unit": "Pa/s" },
+    { "key": "rh700_80",    "label": "RH 700 hPa",                 "band": "relative_humidity_pl700",        "op": "gt",  "value": 80,   "unit": "%" },
+    { "key": "rh500_70",    "label": "RH 500 hPa",                 "band": "relative_humidity_pl500",        "op": "gt",  "value": 70,   "unit": "%" },
+    { "key": "pw_45",       "label": "Precipitable water",         "band": "total_column_water_vapour_sfc",  "op": "gt",  "value": 45,   "unit": "mm" },
+    { "key": "t2m_25c",     "label": "Temp 2m",                    "band": "temperature_2m_sfc",             "op": "gt",  "value": 25,   "unit": "degC" },
+    { "key": "td2m_18c",    "label": "Dewpoint 2m",                "band": "dewpoint_temperature_2m_sfc",    "op": "gt",  "value": 18,   "unit": "degC" },
+    { "key": "t850_15c",    "label": "Temp 850 hPa",               "band": "temperature_pl850",              "op": "gt",  "value": 15,   "unit": "degC" },
+    { "key": "elev_1500m",  "label": "Elevation",                  "band": "elevation",                      "op": "gt",  "value": 1500, "unit": "m" },
+    { "key": "slope_15deg", "label": "Slope",                      "band": "slope",                          "op": "gte", "value": 15,   "unit": "deg" }
+  ],
+  "classes": [
+    { "idx": 0, "name": "Very Low",  "min": 0, "max": 2,  "color": "#2c7bb6" },
+    { "idx": 1, "name": "Low",       "min": 3, "max": 4,  "color": "#abd9e9" },
+    { "idx": 2, "name": "Moderate",  "min": 5, "max": 6,  "color": "#ffffbf" },
+    { "idx": 3, "name": "High",      "min": 7, "max": 8,  "color": "#fdae61" },
+    { "idx": 4, "name": "Very High", "min": 9, "max": 13, "color": "#d7191c" }
+  ],
+  "$classesComment": "These five hex values overlap with the seven CARI classes and mean different things. #fdae61 is High here and Moderately High in CARI. Do not merge the two palettes.",
+  "prioritized": {
+    "$comment": "Ranking runs susceptibility at these leads and takes the peak per district.",
+    "leads": [24, 48, 72],
+    "defaultTop": 20
+  }
+}

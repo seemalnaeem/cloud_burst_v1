@@ -1,0 +1,97 @@
+{
+  "$comment": "Data visualization palettes. These describe data, so they are identical in light and dark themes. UI chrome colors are a separate system, see COLOR_SCHEMES.md and frontend/src/styles/tokens.css.",
+  "version": 1,
+  "continuous": {
+    "kind": "continuous",
+    "colors": ["#000080", "#0000ff", "#00ffff", "#00ff00", "#ffff00", "#ff7f00", "#ff0000", "#ffffff"],
+    "$comment": "Shared ramp used by most forecast bands. 8 stops, so a legend renders 8 evenly spaced ticks."
+  },
+  "rainfall": {
+    "kind": "continuous",
+    "colors": ["#c6dbef", "#6baed6", "#2171b5", "#00ff00", "#ffff00", "#ff7f00", "#ff0000", "#7a0177"]
+  },
+  "elevation": {
+    "kind": "continuous",
+    "colors": ["#000080", "#0000ff", "#00ffff", "#00ff00", "#ffff00", "#ff7f00", "#ff0000", "#8b4513"]
+  },
+  "slope": {
+    "kind": "continuous",
+    "colors": ["#006837", "#a6d96a", "#ffffbf", "#fdae61", "#d7191c", "#67000d"]
+  },
+  "terrain": {
+    "kind": "continuous",
+    "colors": ["#1a4d2e", "#2d7a3a", "#52b788", "#95d5b2", "#f4e8d0", "#dbb66b", "#a67c52", "#6b4423"]
+  },
+  "grayscale": {
+    "kind": "continuous",
+    "colors": ["#000000", "#1a1a1a", "#333333", "#666666", "#999999", "#cccccc", "#e6e6e6", "#ffffff"]
+  },
+  "viridis": {
+    "kind": "continuous",
+    "colors": ["#440154", "#31688e", "#35b779", "#fde724", "#1f9e89", "#5ec962", "#52b788", "#95d5b2"]
+  },
+  "plasma": {
+    "kind": "continuous",
+    "colors": ["#0d0887", "#7e03a8", "#cc4778", "#f89540", "#f0f921", "#f0f921", "#f89540", "#cc4778"]
+  },
+  "cari": {
+    "kind": "classed",
+    "$comment": "7 classes. Boundaries live in cari.json, kept here only as the render palette. Distinct from the susceptibility palette even though hex values overlap.",
+    "colors": ["#2c7bb6", "#abd9e9", "#ffffbf", "#fdae61", "#f46d43", "#d7191c", "#7f0000"],
+    "stepBoundaries": [15, 30, 45, 60, 75, 90]
+  },
+  "susceptibility": {
+    "kind": "classed",
+    "$comment": "5 classes. #fdae61 means High here and Moderately High in the CARI palette.",
+    "colors": ["#2c7bb6", "#abd9e9", "#ffffbf", "#fdae61", "#d7191c"]
+  },
+  "hotspot": {
+    "kind": "classed",
+    "colors": ["#ff0000"]
+  },
+  "precipType": {
+    "kind": "categorical",
+    "$comment": "Codes 2, 4, 9, 10 and 11 are unused and intentionally render as the same dark filler as no precipitation. Known wart carried over on purpose, do not fix it by accident. Only code 1 feeds the rain conditions in the scoring models.",
+    "fallback": "#1a1f3a",
+    "entries": [
+      { "code": 0,  "label": "No precipitation", "color": "#1a1f3a" },
+      { "code": 1,  "label": "Rain",             "color": "#0052cc" },
+      { "code": 3,  "label": "Freezing rain",    "color": "#00d9ff" },
+      { "code": 5,  "label": "Snow",             "color": "#ffffff" },
+      { "code": 6,  "label": "Wet snow",         "color": "#87ceeb" },
+      { "code": 7,  "label": "Rain and snow mix","color": "#ff6b9d" },
+      { "code": 8,  "label": "Ice pellets",      "color": "#ffd700" },
+      { "code": 12, "label": "Freezing drizzle", "color": "#00ff00" }
+    ]
+  },
+  "radarInstantaneous": {
+    "kind": "binned",
+    "unit": "mm/hr",
+    "$comment": "16 bins for Surface-R and CAPPI-R products. Each bin is an upper bound.",
+    "bins": [
+      { "max": 233, "color": "#9900CC" }, { "max": 206, "color": "#CC0071" },
+      { "max": 162, "color": "#FF1C00" }, { "max": 100, "color": "#FD8113" },
+      { "max": 78,  "color": "#FFA600" }, { "max": 61,  "color": "#FFD800" },
+      { "max": 43,  "color": "#FCFE4D" }, { "max": 30,  "color": "#05E033" },
+      { "max": 21,  "color": "#57FA23" }, { "max": 16,  "color": "#A7FA84" },
+      { "max": 10,  "color": "#0745F8" }, { "max": 8,   "color": "#026DF8" },
+      { "max": 6,   "color": "#0097FF" }, { "max": 4,   "color": "#66D4FB" },
+      { "max": 2,   "color": "#51F2FF" }, { "max": 1,   "color": "#A7FFFF" }
+    ]
+  },
+  "radarAccumulated12h": {
+    "kind": "binned",
+    "unit": "mm",
+    "$comment": "16 bins for the Accumulated-R 12 hour product.",
+    "bins": [
+      { "max": 360, "color": "#9900CC" }, { "max": 300, "color": "#561238" },
+      { "max": 200, "color": "#BB4040" }, { "max": 120, "color": "#FF1C00" },
+      { "max": 80,  "color": "#FD8113" }, { "max": 50,  "color": "#FFA600" },
+      { "max": 35,  "color": "#FFD800" }, { "max": 20,  "color": "#FCFE4D" },
+      { "max": 15,  "color": "#05E033" }, { "max": 10,  "color": "#57FA23" },
+      { "max": 6,   "color": "#90EE90" }, { "max": 4,   "color": "#0000FF" },
+      { "max": 2.5, "color": "#0097FF" }, { "max": 1.5, "color": "#66D4FB" },
+      { "max": 0.5, "color": "#E6E6FA" }, { "max": 0.2, "color": "#FFFFFF" }
+    ]
+  }
+}

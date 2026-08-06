@@ -1,0 +1,293 @@
+// The map. Mapbox GL JS.
+//
+// Two rules keep this component from turning into the 6,000 line file the old
+// portal had:
+//
+//   1. Layers come from the contract. This file never names a layer.
+//   2. The map instance lives in a ref, not in state. Putting a map object in
+//      React state re-renders the tree on every pan.
+//
+// Data layers are added on 'style.load' and only there. That event fires on the
+// first load and again after every setStyle, and a style change wipes every
+// source and layer the map had, so this is the single point where they come
+// back. Adding them from the effect as well is what broke the first version:
+// setStyle diffs the incoming style against the live one and removes anything
+// present on the map but absent from the style.
+
+import { useCallback, useEffect, useRef, useState } from 'react'
+import mapboxgl from 'mapbox-gl'
+import 'mapbox-gl/dist/mapbox-gl.css'
+
+import { mapboxToken, styleUrl } from '@/lib/basemaps'
+import {
+  DEFAULT_CENTER, DEFAULT_ZOOM,
+  addVectorLayer, layerIdsFor, setLayerOpacity, setLayerVisible
+} from '@/lib/map'
+
+mapboxgl.accessToken = mapboxToken()
+
+export default function MapView ({
+  layers,
+  visibleLayers,
+  opacities,
+  basemap,
+  projection,
+  onMapReady,
+  onSelectFeature,
+  onHoverFeature
+}) {
+  const containerRef = useRef(null)
+  const mapRef = useRef(null)
+  const hoveredRef = useRef(null)
+  const selectedRef = useRef(null)
+  const styledWithRef = useRef(null)
+  const [ready, setReady] = useState(false)
+  const [failure, setFailure] = useState(null)
+
+  // Latest props without re-running the init effect. The map is created once.
+  const propsRef = useRef({ layers, visibleLayers, opacities })
+  propsRef.current = { layers, visibleLayers, opacities }
+
+  /** Put every contract layer on the map. Safe to call repeatedly. */
+  const installLayers = useCallback(() => {
+    const map = mapRef.current
+    if (!map || !map.getStyle()) return
+    const { layers: defs, visibleLayers: visible, opacities: op } = propsRef.current
+
+    defs.forEach((def) => {
+      addVectorLayer(map, def, visible.has(def.id))
+      if (op[def.id] != null) setLayerOpacity(map, def, op[def.id])
+    })
+  }, [])
+
+  // ------------------------------------------------------------- create once
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return
+
+    const style = styleUrl(basemap)
+    if (!mapboxgl.accessToken || !style) return
+
+    const map = new mapboxgl.Map({
+      container: containerRef.current,
+      style,
+      center: DEFAULT_CENTER,
+      zoom: DEFAULT_ZOOM,
+      maxZoom: 16,
+      attributionControl: false,
+      // Right drag rotates. Needed for the compass control to be worth having.
+      dragRotate: true,
+      pitchWithRotate: true
+    })
+
+    mapRef.current = map
+    styledWithRef.current = basemap
+
+    // Attribution only. The scale bar is deliberately absent: the project owner
+    // does not want it, and Mapbox attribution is a licence requirement so it
+    // stays regardless.
+    map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
+
+    // Fires on first load and after every setStyle.
+    map.on('style.load', () => {
+      installLayers()
+      setReady(true)
+      onMapReady?.(map)
+    })
+
+    // Without this a failing tile or a rejected token produces a blank map and
+    // nothing else. Silent is the worst outcome: it looks identical to "no data
+    // for this area", which is a real state this portal also has.
+    map.on('error', (e) => {
+      const message = e?.error?.message || 'Unknown map error'
+      const status = e?.error?.status
+      if (status === 404) return // an empty vector tile route is normal
+      setFailure({ message, status, source: e?.sourceId })
+    })
+
+    return () => {
+      // React 18 StrictMode mounts, unmounts and remounts every component in
+      // development. Without clearing the ref the remount sees a live map and
+      // returns early, leaving a removed map attached to a detached container
+      // and a blank page.
+      map.remove()
+      mapRef.current = null
+      styledWithRef.current = null
+      setReady(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ------------------------------------------------------------- interaction
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+
+    const clickable = layers.filter((l) => l.clickable)
+    const targets = clickable
+      .flatMap((l) => layerIdsFor(l))
+      .filter((id) => (id.endsWith('-fill') || id.endsWith('-circle')) && map.getLayer(id))
+    if (!targets.length) return
+
+    // One handler on the map, not one per layer.
+    //
+    // Every layer is clickable now, and they overlap: a point inside Lahore is
+    // inside the district, the province and the country all at once. Per layer
+    // handlers all fire for that single click, each overwriting the last, so
+    // the selection landed on whichever handler happened to run last rather
+    // than on what the user aimed at.
+    //
+    // queryRenderedFeatures returns hits in render order with the topmost
+    // first, and the contract lists layers coarse to fine, so the topmost hit
+    // is always the most specific thing under the cursor: tehsil over district,
+    // district over province, province over country.
+    const topmostAt = (point) => map.queryRenderedFeatures(point, { layers: targets })[0] ?? null
+
+    const clearHover = () => {
+      if (hoveredRef.current) {
+        map.setFeatureState(hoveredRef.current, { hover: false })
+        hoveredRef.current = null
+      }
+    }
+
+    const onMove = (e) => {
+      const feature = topmostAt(e.point)
+
+      if (!feature) {
+        map.getCanvas().style.cursor = ''
+        clearHover()
+        onHoverFeature?.(null)
+        return
+      }
+
+      map.getCanvas().style.cursor = 'pointer'
+      const ref = { source: feature.source, sourceLayer: feature.sourceLayer, id: feature.id }
+      if (hoveredRef.current?.id === ref.id && hoveredRef.current?.source === ref.source) return
+
+      clearHover()
+      if (ref.id != null) {
+        map.setFeatureState(ref, { hover: true })
+        hoveredRef.current = ref
+      }
+      onHoverFeature?.(feature.properties)
+    }
+
+    const onLeaveCanvas = () => {
+      map.getCanvas().style.cursor = ''
+      clearHover()
+      onHoverFeature?.(null)
+    }
+
+    const onClick = (e) => {
+      const feature = topmostAt(e.point)
+      if (!feature) return
+
+      if (selectedRef.current) map.setFeatureState(selectedRef.current, { selected: false })
+      const ref = { source: feature.source, sourceLayer: feature.sourceLayer, id: feature.id }
+      if (ref.id != null) {
+        map.setFeatureState(ref, { selected: true })
+        selectedRef.current = ref
+      }
+
+      const def = clickable.find((l) => layerIdsFor(l).includes(feature.layer.id))
+      onSelectFeature?.({ layer: def, properties: feature.properties })
+    }
+
+    map.on('mousemove', onMove)
+    map.on('click', onClick)
+    map.getCanvas().addEventListener('mouseout', onLeaveCanvas)
+
+    return () => {
+      map.off('mousemove', onMove)
+      map.off('click', onClick)
+      map.getCanvas().removeEventListener('mouseout', onLeaveCanvas)
+    }
+  }, [ready, layers, visibleLayers, onSelectFeature, onHoverFeature])
+
+  // ------------------------------------------------------------- visibility
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    layers.forEach((def) => setLayerVisible(map, def, visibleLayers.has(def.id)))
+  }, [ready, layers, visibleLayers])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    layers.forEach((def) => {
+      if (opacities[def.id] != null) setLayerOpacity(map, def, opacities[def.id])
+    })
+  }, [ready, layers, opacities])
+
+  // ------------------------------------------------------------- basemap
+  //
+  // A basemap change rebuilds the whole style, which drops our sources and
+  // re-adds them from the style.load handler above. That is unavoidable, and it
+  // was worth proving rather than assuming.
+  //
+  // The obvious optimisation is to fetch the incoming style as a document,
+  // append our sources and layers to it, and let setStyle diff the result: our
+  // entries appear unchanged on both sides, so the diff should leave them and
+  // their tile cache alone. That was implemented and measured, and Mapbox
+  // rejects it:
+  //
+  //     Unable to perform style diff: Unimplemented: setSprite.
+  //     Rebuilding the style from scratch.
+  //
+  // Every basemap ships its own sprite, Mapbox GL 3 cannot diff a sprite
+  // change, so any switch between two different basemaps falls back to a full
+  // rebuild. Keeping the old sprite would make the diff succeed and render the
+  // new basemap's icons wrong, which is not a trade worth making. The merge was
+  // removed again: it cost an extra request for the style document and changed
+  // nothing.
+  //
+  // What this actually costs, measured: 8 vector tile requests, all served from
+  // the browser cache, 0 bytes from the network. Tiles carry max-age 86400 from
+  // the gateway, so a basemap switch never reaches the backend.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+
+    // Only on a real change. The map was created with this basemap, so calling
+    // setStyle on mount was pure damage.
+    if (styledWithRef.current === basemap) return
+    styledWithRef.current = basemap
+
+    // diff: false because the diff can never succeed here. Mapbox attempts one,
+    // fails on the sprite, warns "Unable to perform style diff: Unimplemented:
+    // setSprite. Rebuilding the style from scratch." and rebuilds anyway. Saying
+    // so up front skips the wasted attempt and the console noise with it.
+    const url = styleUrl(basemap)
+    if (url) map.setStyle(url, { diff: false })
+  }, [ready, basemap])
+
+  // ------------------------------------------------------------- projection
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    map.setProjection(projection)
+  }, [ready, projection])
+
+  return (
+    <>
+      <div ref={containerRef} className="absolute inset-0" />
+
+      {failure && (
+        <div className="pointer-events-auto absolute left-1/2 top-4 z-20 w-[420px] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-cb border border-danger-border bg-danger-soft px-3.5 py-2.5 shadow-cb-lg">
+          <p className="text-[12.5px] font-semibold text-danger">The map could not load a resource</p>
+          <p className="mt-1 break-words text-[11.5px] leading-snug text-text-2">
+            {failure.message}
+            {failure.status ? ` (HTTP ${failure.status})` : ''}
+            {failure.source ? ` from source "${failure.source}"` : ''}
+          </p>
+          <button
+            type="button"
+            onClick={() => setFailure(null)}
+            className="mt-2 text-[11px] font-medium text-danger underline underline-offset-2"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+    </>
+  )
+}

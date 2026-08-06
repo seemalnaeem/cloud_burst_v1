@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cloud Burst Portal</title>
+    <meta name="description" content="Cloudburst risk monitoring and forecast portal for Pakistan" />
+
+    <!--
+      Inline SVG favicon. Without one the browser requests /favicon.ico on every
+      load and logs a 404, which is noise that hides real errors in the console.
+      Data URI rather than a file so there is no asset to lose.
+    -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23256354'/%3E%3Cpath d='M9 19a4 4 0 0 1 .6-8 6 6 0 0 1 11.3 1.6A3.6 3.6 0 0 1 23 19z' fill='%23fbffe4'/%3E%3Cpath d='M12 22l-1.4 3.6M16.5 22l-1.4 3.6M21 22l-1.4 3.6' stroke='%235b8bff' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+
+    <!--
+      Read the stored theme before React mounts. Doing it here rather than in a
+      useEffect avoids the flash of light theme that a dark mode user sees
+      otherwise.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('cbd-theme')
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          document.documentElement.setAttribute('data-theme', stored || (prefersDark ? 'dark' : 'light'))
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light')
+        }
+      })()
+    </script>
+
+    <!--
+      Runtime configuration. Loaded as a plain script rather than compiled in,
+      so a deployment can point the client at a different gateway by editing one
+      file. Leave it empty and the client derives everything from
+      window.location.hostname, which is what makes a changing DHCP address a
+      non event.
+    -->
+    <script src="/runtime-config.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -1,0 +1,173 @@
+{
+  "$comment": "Band catalog. min and max drive both the tile rescale and the legend ticks, so they cannot drift apart. palette resolves against palettes.json. derivedFrom means the band is computed at ingest, not read raw from the source.",
+  "version": 1,
+  "categories": [
+    { "key": "rainfall",    "label": "Rainfall",         "accent": "#dc2626" },
+    { "key": "moisture",    "label": "Moisture",         "accent": "#2563eb" },
+    { "key": "instability", "label": "Instability",      "accent": "#d97706" },
+    { "key": "dynamics",    "label": "Dynamic Lifting",  "accent": "#554570" },
+    { "key": "orographic",  "label": "Orographic",       "accent": "#059669" }
+  ],
+  "bands": [
+    {
+      "key": "total_precipitation_sfc",
+      "label": "Total Precipitation",
+      "unit": "m",
+      "category": "rainfall",
+      "cumulative": true,
+      "internal": true,
+      "$comment": "Cumulative since initialization. Never display this directly, difference it into the hourly band."
+    },
+    {
+      "key": "total_precipitation_sfc_hourly",
+      "label": "Rainfall",
+      "unit": "mm",
+      "category": "rainfall",
+      "min": 0,
+      "max": 100,
+      "palette": "rainfall",
+      "legendTitle": "Hourly Precipitation (mm)",
+      "derivedFrom": {
+        "op": "rate",
+        "source": "total_precipitation_sfc",
+        "formula": "(current - previous) * 1000 / interval_hours",
+        "maskBelowOrEqual": 0
+      }
+    },
+    {
+      "key": "total_column_water_vapour_sfc",
+      "label": "PWAT",
+      "unit": "kg/m2",
+      "category": "moisture",
+      "min": 0, "max": 60,
+      "palette": "continuous",
+      "legendTitle": "PWAT (kg/m2)"
+    },
+    {
+      "key": "relative_humidity_pl700",
+      "label": "RH 700 hPa",
+      "unit": "%",
+      "category": "moisture",
+      "min": 0, "max": 100,
+      "clamp": [0, 100],
+      "palette": "continuous",
+      "legendTitle": "Relative Humidity 700hPa (%)"
+    },
+    {
+      "key": "relative_humidity_pl500",
+      "label": "RH 500 hPa",
+      "unit": "%",
+      "category": "moisture",
+      "min": 0, "max": 100,
+      "clamp": [0, 100],
+      "palette": "continuous",
+      "legendTitle": "Relative Humidity 500hPa (%)"
+    },
+    {
+      "key": "dewpoint_temperature_2m_sfc",
+      "label": "Dew Point 2m",
+      "unit": "degC",
+      "category": "moisture",
+      "min": -10, "max": 30,
+      "palette": "continuous",
+      "legendTitle": "Dewpoint Temperature 2m (degC)"
+    },
+    {
+      "key": "most_unstable_cape_sfc",
+      "label": "CAPE",
+      "unit": "J/kg",
+      "category": "instability",
+      "min": 0, "max": 4000,
+      "palette": "continuous",
+      "legendTitle": "CAPE (J/kg)"
+    },
+    {
+      "key": "temperature_2m_sfc",
+      "label": "Temperature 2m",
+      "unit": "degC",
+      "category": "instability",
+      "min": -10, "max": 50,
+      "palette": "continuous",
+      "legendTitle": "Temperature 2m (degC)"
+    },
+    {
+      "key": "temperature_pl850",
+      "label": "Temperature 850 hPa",
+      "unit": "degC",
+      "category": "instability",
+      "min": -20, "max": 35,
+      "palette": "continuous",
+      "legendTitle": "Temperature 850hPa (degC)"
+    },
+    {
+      "key": "vertical_velocity_pl500",
+      "label": "Vert. Velocity 500 hPa",
+      "unit": "Pa/s",
+      "category": "dynamics",
+      "min": -2, "max": 2,
+      "palette": "continuous",
+      "legendTitle": "Vertical Velocity 500hPa (Pa/s)",
+      "$comment": "Negative is upward motion. Reduces with min."
+    },
+    {
+      "key": "vertical_velocity_pl700",
+      "label": "Vert. Velocity 700 hPa",
+      "unit": "Pa/s",
+      "category": "dynamics",
+      "min": -2, "max": 2,
+      "palette": "continuous",
+      "legendTitle": "Vertical Velocity 700hPa (Pa/s)",
+      "$comment": "Negative is upward motion. Reduces with min."
+    },
+    {
+      "key": "wind_speed_pl850",
+      "label": "Wind Speed 850 hPa",
+      "unit": "km/hr",
+      "category": "dynamics",
+      "min": 0, "max": 100,
+      "palette": "continuous",
+      "legendTitle": "Wind Speed 850hPa (km/hr)",
+      "derivedFrom": {
+        "op": "magnitude",
+        "sources": ["u_component_of_wind_pl850", "v_component_of_wind_pl850"],
+        "formula": "sqrt(u^2 + v^2) * 3.6"
+      }
+    },
+    {
+      "key": "precipitation_type_sfc",
+      "label": "Precipitation Type",
+      "unit": "code",
+      "category": "rainfall",
+      "min": 0, "max": 12,
+      "categorical": true,
+      "resampling": "nearest",
+      "palette": "precipType",
+      "legendTitle": "Precipitation Type"
+    },
+    {
+      "key": "elevation",
+      "label": "Elevation",
+      "unit": "m",
+      "category": "orographic",
+      "static": true,
+      "min": 0, "max": 5000,
+      "palette": "elevation",
+      "legendTitle": "Elevation (m)"
+    },
+    {
+      "key": "slope",
+      "label": "Slope",
+      "unit": "deg",
+      "category": "orographic",
+      "static": true,
+      "min": 0, "max": 45,
+      "palette": "slope",
+      "legendTitle": "Slope (deg)",
+      "derivedFrom": {
+        "op": "gdaldem_slope",
+        "source": "elevation",
+        "$comment": "gdaldem slope -compute_edges -s 111120, the scale factor is required for a geographic DEM"
+      }
+    }
+  ]
+}

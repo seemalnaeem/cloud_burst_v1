@@ -1,0 +1,34 @@
+{
+  "$comment": "Forecast cycle and lead time model. Subtler than it looks, so it is expressed once here and implemented once in backend/app/shared/timeutil.py. See DATA_SOURCES.md section 11.",
+  "version": 1,
+  "model": "ECMWF IFS OPER",
+  "cycleHours": 6,
+  "leadGrid": [
+    { "fromHour": 0,   "toHour": 144, "stepHours": 3 },
+    { "fromHour": 144, "toHour": 360, "stepHours": 6 }
+  ],
+  "maxLeadHours": 360,
+  "history": {
+    "$comment": "Negative leads resolve backwards into past cycles rather than into a past forecast hour of the current cycle.",
+    "hours": 168,
+    "stepHours": 6,
+    "minLeadHours": -168
+  },
+  "publishedLeads": {
+    "$comment": "A cycle publishes incrementally and may skip a grid point. Always read the actual published leads and snap to the nearest one rather than trusting the grid.",
+    "snapToNearestPublished": true,
+    "fallbackToGrid": true
+  },
+  "creationTimeTtlSeconds": 300,
+  "resultTtlSeconds": 21600,
+  "timezone": {
+    "label": "PKT",
+    "offsetHours": 5
+  },
+  "precipRate": {
+    "$comment": "Cumulative precipitation is differenced against the previous PUBLISHED lead, not the previous grid lead. The old system had two implementations of this and one of them could hit a null on a skipped lead.",
+    "usePreviousPublishedLead": true,
+    "atLeadZero": { "previous": 0, "currentFallbackHours": 3 },
+    "minIntervalHours": 1
+  }
+}

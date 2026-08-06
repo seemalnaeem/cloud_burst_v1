@@ -1,0 +1,29 @@
+{
+  "name": "cbd-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloud Burst Dev gateway. Single origin for the browser, cache, upstream proxy.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "lint": "eslint src",
+    "test": "node --test src/**/*.test.js"
+  },
+  "dependencies": {
+    "compression": "^1.7.5",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "http-proxy-middleware": "^3.0.3",
+    "pino": "^9.6.0",
+    "pino-http": "^10.4.0",
+    "undici": "^7.2.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.17.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

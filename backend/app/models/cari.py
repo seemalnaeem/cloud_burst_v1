@@ -1,0 +1,175 @@
+"""CARI, the Convective Activity Risk Index.
+
+Thirteen variables graded 0 to 6, weighted, summed, expressed as a percentage
+and classified. Every number comes from shared/contracts/cari.json. If you find
+yourself typing 70.5 or 0.75 into this file, stop.
+
+See .claude/skills/cari-scoring/SKILL.md for the reasoning behind the mechanics.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from app.shared import contracts
+
+_C = contracts.cari()
+_VARS = {v["key"]: v for v in _C["variables"]}
+_ORDER = [v["key"] for v in _C["variables"]]
+
+
+def _normalize(text: str | None) -> str:
+    return re.sub(r"[^A-Za-z]", "", text or "").lower()
+
+
+def grade(value: float | None, thresholds: list[float], order: str) -> int:
+    """Grade one value against its six thresholds.
+
+    Ascending: the grade is the index of the first threshold the value does not
+    exceed. Descending, used only by the two vertical velocity bands: the grade
+    is the index of the first threshold the value is still above, because a
+    more negative value means a stronger updraft and therefore a higher grade.
+
+    A missing value grades 0. Forecast gaps are normal, not exceptional.
+    """
+    if value is None:
+        return 0
+
+    if order == "asc":
+        for i, t in enumerate(thresholds):
+            if value <= t:
+                return i
+        return 6
+
+    for i, t in enumerate(thresholds):
+        if value > t:
+            return i
+    return 6
+
+
+def terrain_class(province: str | None, district: str | None) -> str:
+    """Which threshold matrix a district scores against.
+
+    A business rule, not data. Mirrored in score.terrain_class in the database
+    so an analyst querying directly gets the same answer, and a test keeps the
+    two in step.
+    """
+    sel = _C["matrixSelection"]
+    p = _normalize(province)
+
+    if p in sel["terrainProvinces"]:
+        return "terrain"
+
+    if p.startswith("punjab"):
+        return "terrain" if district in sel["punjabTerrainDistricts"] else "lowlands"
+
+    return sel["default"]
+
+
+def classify(percent: float) -> dict:
+    for cls in _C["classes"]:
+        if percent <= cls["max"]:
+            return cls
+    return _C["classes"][-1]
+
+
+@dataclass
+class CariResult:
+    matrix: str
+    values: dict[str, float | None]
+    scores: dict[str, int] = field(default_factory=dict)
+    primary_sum: float = 0.0
+    secondary_sum: float = 0.0
+    cas: float = 0.0
+    cas_max: float = 0.0
+    cari: float = 0.0
+    class_idx: int = 0
+    risk_level: str = ""
+    risk_color: str = ""
+    override_applied: bool = False
+
+
+def score(values: dict[str, float | None], matrix: str) -> CariResult:
+    """Score one district.
+
+    values is keyed by variable key (RF, CAPE, ...) and already reduced to a
+    single number per district. The reducer used to get there is part of the
+    contract and differs per variable, min for vertical velocity and max for
+    everything else. See .claude/memory/reducer-semantics.md.
+    """
+    if matrix not in _C["matrices"]:
+        raise ValueError(f"Unknown matrix {matrix!r}")
+
+    thresholds = _C["matrices"][matrix]["thresholds"]
+    weights = _C["weights"]
+
+    scores: dict[str, int] = {}
+    primary_sum = 0.0
+    secondary_sum = 0.0
+
+    for key in _ORDER:
+        spec = _VARS[key]
+        raw = values.get(key)
+
+        if raw is not None and "clamp" in spec:
+            low, high = spec["clamp"]
+            raw = min(max(raw, low), high)
+
+        g = grade(raw, thresholds[key], spec["order"])
+        scores[key] = g
+
+        if spec["tier"] == "primary":
+            primary_sum += g
+        else:
+            secondary_sum += g
+
+    cas = primary_sum * weights["primary"] + secondary_sum * weights["secondary"]
+    cas_max = _C["casMax"]
+    percent = cas / cas_max * 100.0
+
+    cls = classify(percent)
+    class_idx = cls["idx"]
+    override_applied = False
+
+    # Primary extreme override. Counts primary variables grading at the top and
+    # raises the class floor. It only ever raises, so a class higher than the
+    # percentage alone suggests is expected rather than a bug.
+    ov = _C["primaryExtremeOverride"]
+    extreme_count = sum(
+        1 for k, g in scores.items() if _VARS[k]["tier"] == "primary" and g >= ov["gradeAtLeast"]
+    )
+    for rule in ov["rules"]:
+        if extreme_count >= rule["countAtLeast"] and class_idx < rule["floorClassIdx"]:
+            class_idx = rule["floorClassIdx"]
+            override_applied = True
+            break
+
+    final = _C["classes"][class_idx]
+
+    return CariResult(
+        matrix=matrix,
+        values=values,
+        scores=scores,
+        primary_sum=primary_sum,
+        secondary_sum=secondary_sum,
+        cas=round(cas, 4),
+        cas_max=cas_max,
+        cari=round(percent, 2),
+        class_idx=class_idx,
+        risk_level=final["name"],
+        risk_color=final["color"],
+        override_applied=override_applied,
+    )
+
+
+def variable_specs() -> list[dict]:
+    """Variable catalog, for callers that need to know what to fetch and how to
+    reduce it."""
+    return _C["variables"]
+
+
+def reducers() -> dict[str, str]:
+    """Variable key to reducer name. Pass these to zonal statistics, do not
+    default them."""
+    return {v["key"]: v["reducer"] for v in _C["variables"]}

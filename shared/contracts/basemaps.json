@@ -1,0 +1,18 @@
+{
+  "$comment": "Basemap catalogue. Mapbox GL JS consumes these mapbox:// style URLs natively, so there is no tile template and no raster workaround: the style is passed straight to the map. The token is supplied at runtime, never committed: set VITE_MAPBOX_TOKEN in .env, or mapboxToken in public/runtime-config.js for a deployment. Mapbox GL cannot draw anything without a token, so the portal says so plainly rather than showing an empty map.",
+  "version": 3,
+  "default": "outdoors",
+  "darkPreference": "dark",
+  "lightPreference": "outdoors",
+  "basemaps": [
+    { "id": "satellite", "label": "Satellite", "style": "mapbox://styles/mapbox/satellite-streets-v12", "icon": "satellite", "scheme": "dark" },
+    { "id": "outdoors",  "label": "Outdoors",  "style": "mapbox://styles/mapbox/outdoors-v12",          "icon": "terrain",   "scheme": "light" },
+    { "id": "streets",   "label": "Streets",   "style": "mapbox://styles/mapbox/streets-v12",           "icon": "streets",   "scheme": "light" },
+    { "id": "light",     "label": "Light",     "style": "mapbox://styles/mapbox/light-v11",             "icon": "sun",       "scheme": "light" },
+    { "id": "dark",      "label": "Dark",      "style": "mapbox://styles/mapbox/dark-v11",              "icon": "moon",      "scheme": "dark" }
+  ],
+  "projections": [
+    { "id": "mercator", "label": "Mercator", "$comment": "Web Mercator, the default. Correct for tiles and for anything measured in tile space." },
+    { "id": "globe", "label": "Globe", "$comment": "Mapbox globe projection. Honest at national scale and up, and the reason the north reset control exists." }
+  ]
+}

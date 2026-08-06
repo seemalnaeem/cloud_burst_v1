@@ -1,0 +1,71 @@
+{
+  "$comment": "Port allocation, fixed by the project owner. Backend range is 3090 to 3099, frontend range is 4090 to 4099. Container-internal ports match host ports one to one, so there is one number per service and nothing to translate. Taking a new port means updating this file, .env.example, docker-compose.yml and the table in .claude/guardrails/ports-and-networking.md together.",
+  "version": 2,
+  "ranges": {
+    "backend": { "from": 3090, "to": 3099 },
+    "frontend": { "from": 4090, "to": 4099 }
+  },
+  "services": [
+    {
+      "name": "cbd-db",
+      "role": "database",
+      "hostPort": 5545,
+      "containerPort": 5545,
+      "internalUrl": "postgresql://cbd-db:5545/cari",
+      "note": "Not 5432. A native PostgreSQL service already holds 5432 on the development machine, verified 2026-08-06."
+    },
+    {
+      "name": "cbd-gateway",
+      "role": "middleware",
+      "hostPort": 3090,
+      "containerPort": 3090,
+      "internalUrl": "http://cbd-gateway:3090",
+      "public": true,
+      "note": "The only port the browser needs for data. Everything else routes through it."
+    },
+    {
+      "name": "cbd-api",
+      "role": "backend",
+      "hostPort": 3091,
+      "containerPort": 3091,
+      "internalUrl": "http://cbd-api:3091",
+      "note": "FastAPI. Exposed on the host for debugging and the OpenAPI docs at /docs."
+    },
+    {
+      "name": "cbd-tiles",
+      "role": "vector-tiles",
+      "hostPort": 3092,
+      "containerPort": 3092,
+      "internalUrl": "http://cbd-tiles:3092",
+      "note": "pg_tileserv, MVT from PostGIS functions. Moved off its 7800 default via TS_HTTPPORT."
+    },
+    {
+      "name": "cbd-raster",
+      "role": "raster-tiles",
+      "hostPort": 3093,
+      "containerPort": 3093,
+      "internalUrl": "http://cbd-raster:3093",
+      "note": "TiTiler over COG files in /data/cog. Moved off its 8000 default via PORT."
+    },
+    {
+      "name": "cbd-web",
+      "role": "frontend",
+      "hostPort": 4090,
+      "containerPort": 4090,
+      "public": true,
+      "note": "Vite dev server. Listens on 0.0.0.0 with allowedHosts enabled so any LAN address works."
+    },
+    {
+      "name": "cbd-web-prod",
+      "role": "frontend",
+      "hostPort": 4091,
+      "containerPort": 4091,
+      "profile": "prod",
+      "note": "nginx serving the production build, listening on 4091 rather than 80. Optional compose profile."
+    }
+  ],
+  "free": {
+    "backend": [3094, 3095, 3096, 3097, 3098, 3099],
+    "frontend": [4092, 4093, 4094, 4095, 4096, 4097, 4098, 4099]
+  }
+}

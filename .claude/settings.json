@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(docker compose:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker exec:*)",
+      "Bash(npm run:*)",
+      "Bash(npm ci:*)",
+      "Bash(npm install:*)",
+      "Bash(npx vite:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(psql:*)",
+      "Bash(ogrinfo:*)",
+      "Bash(gdalinfo:*)",
+      "Bash(ogr2ogr:*)",
+      "Bash(gdal_translate:*)",
+      "Bash(gdalwarp:*)",
+      "Bash(gdaldem:*)",
+      "Bash(rio:*)",
+      "Bash(curl -s http://localhost:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./secrets/**)",
+      "Read(./**/*service-account*.json)",
+      "Bash(docker compose down -v:*)",
+      "Bash(dropdb:*)",
+      "Bash(rm -rf /:*)"
+    ]
+  },
+  "env": {
+    "PGDATABASE": "cari",
+    "PGUSER": "cbd_user",
+    "PGPORT": "5545",
+    "PGHOST": "localhost"
+  }
+}

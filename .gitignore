@@ -1,0 +1,71 @@
+# Environment
+.env
+.env.local
+*.local
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+.vite/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data, none of it. This repository is the codebase.
+#
+# The source data is delivered separately and lives in PostGIS once ingested,
+# so the database is the copy that matters. Keeping it out is not only tidiness:
+# data/ is 2.1 GB here, and District_Boundary.shp alone is 104 MB against
+# GitHub's 100 MB hard limit per file, so a push carrying it is rejected
+# outright. Reload with scripts/ingest/ingest_admin.py, which is versioned.
+data/*
+!data/.gitkeep
+!data/**/.gitkeep
+
+# Geospatial binaries, wherever they turn up
+*.tif
+*.tiff
+*.grib
+*.grib2
+*.nc
+*.zip
+*.shp
+*.shx
+*.dbf
+*.sbn
+*.sbx
+*.prj
+*.cpg
+*.qmd
+*.shp.xml
+
+# Caches
+.cache/
+backend/.cache/
+middleware/.cache/
+
+# Credentials, never commit these
+secrets/
+*.pem
+*-service-account*.json
+*credentials*.json
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Docker volumes mounted locally
+db/pgdata/

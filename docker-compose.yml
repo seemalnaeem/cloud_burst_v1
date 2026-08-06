@@ -1,0 +1,268 @@
+# Cloud Burst Dev stack.
+#
+# One user-defined bridge network. No fixed IP addresses anywhere, on purpose.
+# Docker allocates container addresses from its own pool and resolves service
+# names through its embedded DNS, so containers find each other by name. Host
+# ports bind every interface, so the stack answers on whatever address the
+# machine holds today. See .claude/guardrails/ports-and-networking.md.
+#
+# Container-internal ports match their host ports one to one. Bridge networking
+# already namespaces internal ports, so a clash with another stack is not
+# possible, but keeping the numbers identical means there is only ever one port
+# to remember per service and no mental translation when reading a log line.
+
+name: cloud-burst-dev
+
+networks:
+  cbd-net:
+    driver: bridge
+
+volumes:
+  cbd-pgdata:
+  cbd-gateway-cache:
+
+services:
+  # ------------------------------------------------------------------ database
+  cbd-db:
+    build:
+      context: ./db
+    container_name: cbd-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cari}
+      POSTGRES_USER: ${POSTGRES_USER:-cbd_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGDATA: /var/lib/postgresql/data/pgdata
+      PGPORT: "5545"
+      TZ: ${TZ:-Asia/Karachi}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5545}:5545"
+    volumes:
+      - cbd-pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - ./db/migrations:/migrations:ro
+    networks: [cbd-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cbd_user} -d ${POSTGRES_DB:-cari} -p 5545"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      # First boot runs the init SQL and builds the PostGIS extensions, which
+      # is not instant. Too short a start period gets the container killed
+      # mid-init and leaves a half-built schema.
+      start_period: 60s
+    shm_size: 512mb
+    command:
+      - postgres
+      # Listen on 5545 inside the container too, so the port is 5545 everywhere
+      # and there is no host to container translation to remember.
+      - -p
+      - "5545"
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=64MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_parallel_workers_per_gather=4
+
+  # ------------------------------------------------------- backend, FastAPI + GDAL
+  cbd-api:
+    build:
+      context: ./backend
+    container_name: cbd-api
+    restart: unless-stopped
+    depends_on:
+      cbd-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cbd_user}:${POSTGRES_PASSWORD:-postgres}@cbd-db:5545/${POSTGRES_DB:-cari}
+      API_PORT: ${API_PORT:-3091}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TZ: ${TZ:-Asia/Karachi}
+      DATA_DIR: /data
+      COG_DIR: /data/cog
+      RAW_DIR: /data/raw
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-4}
+      GDAL_CACHEMAX: ${GDAL_CACHEMAX:-512}
+      GDAL_NUM_THREADS: ${GDAL_NUM_THREADS:-ALL_CPUS}
+      GDAL_DISABLE_READDIR_ON_OPEN: ${GDAL_DISABLE_READDIR_ON_OPEN:-EMPTY_DIR}
+      # All anonymous sources. No credential variable exists in this stack.
+      UPSTREAM_GFS_BASE: ${UPSTREAM_GFS_BASE:-https://noaa-gfs-bdp-pds.s3.amazonaws.com}
+      UPSTREAM_GFS_FILTER: ${UPSTREAM_GFS_FILTER:-https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl}
+      UPSTREAM_ECMWF_OPENDATA: ${UPSTREAM_ECMWF_OPENDATA:-https://data.ecmwf.int/forecasts}
+      UPSTREAM_DEM_BASE: ${UPSTREAM_DEM_BASE:-https://copernicus-dem-30m.s3.amazonaws.com}
+      UPSTREAM_PMD_RADAR_BASE: ${UPSTREAM_PMD_RADAR_BASE:-}
+      UPSTREAM_PMD_PRESS_BASE: ${UPSTREAM_PMD_PRESS_BASE:-}
+      AOI_WEST: ${AOI_WEST:-59}
+      AOI_SOUTH: ${AOI_SOUTH:-22}
+      AOI_EAST: ${AOI_EAST:-79}
+      AOI_NORTH: ${AOI_NORTH:-38}
+    ports:
+      - "${API_PORT:-3091}:3091"
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/tests:/app/tests
+      - ./shared:/shared:ro
+      - ./data:/data
+      - ./scripts/ingest:/app/ingest:ro
+      # Promotion SQL lives with the schema, not with the script that runs it,
+      # so a schema change and its ingest counterpart are reviewed together.
+      - ./db/ingest:/app/db_ingest:ro
+    networks: [cbd-net]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:3091/health', timeout=4).status==200 else 1)\""]
+      interval: 15s
+      timeout: 8s
+      retries: 6
+      start_period: 40s
+
+  # ---------------------------------------------------- middleware, Express gateway
+  cbd-gateway:
+    build:
+      context: ./middleware
+    container_name: cbd-gateway
+    restart: unless-stopped
+    depends_on:
+      cbd-api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      GATEWAY_PORT: ${GATEWAY_PORT:-3090}
+      API_INTERNAL_URL: http://cbd-api:3091
+      TILES_INTERNAL_URL: http://cbd-tiles:3092
+      RASTER_INTERNAL_URL: http://cbd-raster:3093
+      CORS_ORIGINS: ${CORS_ORIGINS:-reflect}
+      CACHE_DIR: /app/.cache
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-21600}
+      CACHE_PRUNE_DAYS: ${CACHE_PRUNE_DAYS:-10}
+      UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-180000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TZ: ${TZ:-Asia/Karachi}
+    ports:
+      - "${GATEWAY_PORT:-3090}:3090"
+    volumes:
+      - ./middleware/src:/app/src
+      - ./shared:/shared:ro
+      - cbd-gateway-cache:/app/.cache
+    networks: [cbd-net]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3090/health || exit 1"]
+      interval: 15s
+      timeout: 8s
+      retries: 6
+      start_period: 20s
+
+  # --------------------------------------------------- vector tiles, pg_tileserv
+  cbd-tiles:
+    image: pramsey/pg_tileserv:latest
+    container_name: cbd-tiles
+    restart: unless-stopped
+    depends_on:
+      cbd-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cbd_user}:${POSTGRES_PASSWORD:-postgres}@cbd-db:5545/${POSTGRES_DB:-cari}
+      TS_BASEPATH: /
+      TS_HTTPPORT: "3092"
+      TS_DEFAULTRESOLUTION: "4096"
+      TS_DEFAULTBUFFER: "64"
+      TS_MAXZOOM: "18"
+      TS_CORSORIGINS: "*"
+    ports:
+      - "${TILES_PORT:-3092}:3092"
+    networks: [cbd-net]
+    healthcheck:
+      # A bash /dev/tcp connect, not wget or curl: the pg_tileserv image ships
+      # neither, so the obvious probe reported the container unhealthy while it
+      # was serving tiles perfectly well. It does ship bash.
+      #
+      # Opening the port is a sufficient signal here. pg_tileserv connects to
+      # Postgres and reads the function catalogue before it starts listening,
+      # which its own startup log shows in that order, so a listening port
+      # already implies a working database connection.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3092"]
+      interval: 20s
+      timeout: 8s
+      retries: 6
+      start_period: 30s
+
+  # --------------------------------------------------- raster tiles, TiTiler
+  cbd-raster:
+    image: ghcr.io/developmentseed/titiler:latest
+    container_name: cbd-raster
+    restart: unless-stopped
+    environment:
+      PORT: "3093"
+      HOST: "0.0.0.0"
+      # Reading COGs from a mounted volume, not from object storage. Disabling
+      # the directory scan keeps GDAL from listing the whole folder looking for
+      # sidecar files on every open.
+      GDAL_DISABLE_READDIR_ON_OPEN: EMPTY_DIR
+      GDAL_CACHEMAX: "256"
+      TITILER_API_CORS_ORIGINS: "*"
+    ports:
+      - "${RASTER_PORT:-3093}:3093"
+    volumes:
+      - ./data/cog:/data/cog:ro
+    networks: [cbd-net]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:3093/healthz', timeout=4).status==200 else 1)\""]
+      interval: 20s
+      timeout: 8s
+      retries: 6
+      start_period: 30s
+
+  # ------------------------------------------------------- frontend, Vite dev
+  cbd-web:
+    build:
+      context: ./frontend
+      target: dev
+    container_name: cbd-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      # Blank API base on purpose. The client resolves the host from
+      # window.location.hostname at page load, so a new DHCP address needs no
+      # rebuild. Only set this when pointing at a remote deployment.
+      VITE_API_BASE: ${VITE_API_BASE:-}
+      VITE_GATEWAY_PORT: ${GATEWAY_PORT:-3090}
+      # Mapbox basemap token. A public client token, restricted by URL in the
+      # Mapbox account, not a secret. Blank is a supported state: the portal
+      # falls back to the open basemap and says so in the basemap switcher.
+      VITE_MAPBOX_TOKEN: ${VITE_MAPBOX_TOKEN:-}
+      TZ: ${TZ:-Asia/Karachi}
+    ports:
+      - "${WEB_PORT:-4090}:4090"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.js:/app/vite.config.js
+      - ./shared:/shared:ro
+    networks: [cbd-net]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4090/ >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 8s
+      retries: 6
+      start_period: 30s
+
+  # ------------------------------------------- frontend production build, optional
+  cbd-web-prod:
+    build:
+      context: ./frontend
+      target: prod
+    container_name: cbd-web-prod
+    restart: unless-stopped
+    profiles: [prod]
+    ports:
+      - "${WEB_PROD_PORT:-4091}:4091"
+    networks: [cbd-net]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4091/ >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 8s
+      retries: 6
+      start_period: 15s

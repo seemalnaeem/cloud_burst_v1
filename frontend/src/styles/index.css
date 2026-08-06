@@ -1,0 +1,208 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+/*
+  Map design tokens onto Tailwind utilities.
+
+  The `inline` keyword matters. Without it Tailwind resolves the variable at
+  build time and freezes the light value, so bg-panel stays white in dark mode
+  and the whole theming approach quietly stops working.
+*/
+@theme inline {
+  --color-bg: var(--cb-bg);
+  --color-bg-2: var(--cb-bg-2);
+  --color-panel: var(--cb-panel);
+  --color-panel-2: var(--cb-panel-2);
+  --color-panel-3: var(--cb-panel-3);
+
+  --color-text: var(--cb-text);
+  --color-text-2: var(--cb-text-2);
+  --color-muted: var(--cb-muted);
+
+  --color-border: var(--cb-border);
+  --color-border-strong: var(--cb-border-strong);
+
+  --color-primary: var(--cb-primary);
+  --color-primary-soft: var(--cb-primary-soft);
+  --color-primary-border: var(--cb-primary-border);
+  --color-chip: var(--cb-chip);
+  --color-chip-text: var(--cb-chip-text);
+  --color-header: var(--cb-header);
+
+  --color-teal: var(--cb-teal);
+  --color-teal-accent: var(--cb-teal-accent);
+  --color-cream: var(--cb-cream);
+
+  --color-danger: var(--cb-danger);
+  --color-danger-soft: var(--cb-danger-soft);
+  --color-danger-border: var(--cb-danger-border);
+  --color-amber: var(--cb-amber);
+  --color-amber-soft: var(--cb-amber-soft);
+  --color-amber-border: var(--cb-amber-border);
+  --color-green: var(--cb-green);
+  --color-green-soft: var(--cb-green-soft);
+  --color-green-border: var(--cb-green-border);
+
+  --color-alert: var(--cb-alert);
+  --color-accent-rain: var(--cb-accent-rain);
+  --color-accent-pwat: var(--cb-accent-pwat);
+  --color-accent-elev: var(--cb-accent-elev);
+
+  --radius-cb: var(--cb-radius);
+  --radius-cb-sm: var(--cb-radius-sm);
+  --font-cb: var(--cb-font);
+
+  --shadow-cb: var(--cb-shadow);
+  --shadow-cb-lg: var(--cb-shadow-lg);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--cb-bg);
+  color: var(--cb-text);
+  font-family: var(--cb-font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Form controls do not inherit the document font by default, so without this
+   every button and input falls back to the browser default and the interface
+   is quietly two typefaces. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* Mapbox draws its own attribution and popups outside the React tree, so they
+   need the family naming explicitly. */
+.mapboxgl-map,
+.mapboxgl-popup {
+  font-family: var(--cb-font);
+}
+
+/* Keep focus visible. Removing an outline without providing a replacement
+   makes the portal unusable by keyboard. */
+:focus-visible {
+  outline: 2px solid var(--cb-primary);
+  outline-offset: 2px;
+}
+
+/* Custom scrollbars for the sidebar and legend panels. */
+.cb-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.cb-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.cb-scroll::-webkit-scrollbar-thumb {
+  background: #d3d9e2;
+  border-radius: 4px;
+}
+.cb-scroll::-webkit-scrollbar-thumb:hover {
+  background: #bcc4d0;
+}
+:root[data-theme='dark'] .cb-scroll::-webkit-scrollbar-thumb {
+  background: var(--cb-border-strong);
+}
+
+/* Section header. Flat fills only.
+ *
+ * COLOR_SCHEMES.md section 4.1 specifies a teal opacity ramp here. The project
+ * owner's no-gradients rule overrides it, so state is carried by a solid tint
+ * and the left accent bar instead. The three states stay clearly distinct,
+ * which was the point of the ramp. */
+.cb-section {
+  background: var(--cb-panel-2);
+  border: 1px solid var(--cb-border);
+  border-left: 3px solid transparent;
+}
+.cb-section:hover {
+  background: var(--cb-panel-3);
+  border-color: var(--cb-border-strong);
+}
+.cb-section[data-open='true'] {
+  background: var(--cb-panel-3);
+  border-color: var(--cb-border-strong);
+  border-left-color: var(--cb-teal-accent);
+}
+
+/* Alert pulse. Theme independent, alert red is alert red. */
+@keyframes cb-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(185, 28, 28, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 6px rgba(185, 28, 28, 0);
+  }
+}
+.cb-pulse {
+  animation: cb-pulse 1.8s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cb-pulse {
+    animation: none;
+  }
+}
+
+/* Mapbox GL's own chrome. The navigation control is replaced by our themed
+   MapControls, but attribution and scale are still Mapbox's and ship with
+   light styling baked in, so they need bringing into the theme. */
+.mapboxgl-ctrl-attrib,
+.mapboxgl-ctrl-scale {
+  background: var(--cb-panel) !important;
+  color: var(--cb-text-2) !important;
+  border: 1px solid var(--cb-border) !important;
+  border-radius: 6px !important;
+  font-family: var(--cb-font) !important;
+  font-size: 10.5px !important;
+}
+.mapboxgl-ctrl-attrib a {
+  color: var(--cb-text-2) !important;
+}
+.mapboxgl-ctrl-scale {
+  border-top-width: 2px !important;
+}
+:root[data-theme='dark'] .mapboxgl-ctrl-attrib-button {
+  /* The stock icon is a dark glyph, invisible on the dark panel. */
+  filter: invert(1) !important;
+}
+
+.mapboxgl-canvas-container canvas {
+  outline: none;
+}
+
+/* The map must fill its absolutely positioned container. Without an explicit
+   height Mapbox measures the container as zero and renders a blank canvas with
+   no error at all. */
+.mapboxgl-map {
+  width: 100%;
+  height: 100%;
+}
+
+/* Range inputs. accent-color handles the modern browsers; the track needs a
+   height so it does not render as a hairline on WebKit. */
+input[type='range'] {
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+}
+input[type='range']::-webkit-slider-thumb {
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--cb-knob);
+  box-shadow: var(--cb-knob-shadow);
+  border: 1px solid var(--cb-border-strong);
+  cursor: pointer;
+}

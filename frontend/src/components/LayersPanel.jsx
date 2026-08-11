@@ -282,7 +282,7 @@ function LevelSelect ({ levels, value, onChange, label }) {
             width: WIDTH,
             boxShadow: '0 8px 24px rgba(16,24,40,0.16)'
           }}
-          className="z-[60] overflow-hidden rounded-cb-sm border border-border bg-panel py-1"
+          className="z-[60] overflow-hidden rounded-cb-sm border border-border bg-panel"
         >
           {levels.map((l) => {
             const active = l.level === value
@@ -297,6 +297,100 @@ function LevelSelect ({ levels, value, onChange, label }) {
                 >
                   <span className="tabular-nums">{l.levelLabel}</span>
                   {active && <TbCheck className="text-[11px]" aria-hidden />}
+                </button>
+              </li>
+            )
+          })}
+        </ul>,
+        document.body
+      )}
+    </div>
+  )
+}
+
+// The model selector, a themed dropdown. One model is active at a time and it
+// drives the map and the timeline, so this is a single choice, not a row of
+// tags. Models without an ingested cycle are listed but disabled, so the absence
+// reads as pending rather than missing. Same portaled listbox as the level
+// selector, full width, so the scrolling panel cannot clip it.
+function ModelSelect ({ models, value, available, onSelect }) {
+  const [open, setOpen] = useState(false)
+  const [rect, setRect] = useState(null)
+  const btnRef = useRef(null)
+  const current = models.find((m) => m.modelId === value) ?? models[0]
+
+  useEffect(() => {
+    if (!open) return
+    setRect(btnRef.current?.getBoundingClientRect() ?? null)
+    const close = () => setOpen(false)
+    const onDoc = (e) => {
+      if (btnRef.current?.contains(e.target)) return
+      if (e.target.closest?.('[data-model-menu]')) return
+      setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDoc)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('pointerdown', onDoc)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
+  return (
+    <div>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Forecast model"
+        className={`flex w-full items-center gap-2 rounded-cb-sm border px-2.5 py-1.5 text-left transition-colors ${
+          open ? 'border-primary bg-primary-soft' : 'border-border bg-panel-2 hover:border-border-strong'
+        }`}
+      >
+        <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted">Model</span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-text">{current?.modelLabel}</span>
+        <TbChevronDown className={`shrink-0 text-[13px] text-muted transition-transform duration-200 ${open ? 'rotate-180' : ''}`} aria-hidden />
+      </button>
+
+      {open && rect && createPortal(
+        <ul
+          data-model-menu
+          role="listbox"
+          aria-label="Forecast model"
+          style={{
+            position: 'fixed',
+            top: rect.bottom + 4,
+            left: rect.left,
+            width: rect.width,
+            boxShadow: '0 8px 24px rgba(16,24,40,0.16)'
+          }}
+          className="z-[60] overflow-hidden rounded-cb-sm border border-border bg-panel"
+        >
+          {models.map((m) => {
+            const active = m.modelId === value
+            const ok = available(m.modelId)
+            return (
+              <li key={m.modelId} role="option" aria-selected={active}>
+                <button
+                  type="button"
+                  disabled={!ok}
+                  onClick={() => { onSelect(m.modelId); setOpen(false) }}
+                  title={ok ? m.modelFull : `${m.modelFull} (no cycle ingested yet)`}
+                  className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] transition-colors ${
+                    active
+                      ? 'bg-primary-soft font-semibold text-primary'
+                      : ok
+                        ? 'text-text-2 hover:bg-panel-2 hover:text-text'
+                        : 'cursor-not-allowed text-muted opacity-60'
+                  }`}
+                >
+                  {!ok && <TbClockPause className="shrink-0 text-[12px]" aria-hidden />}
+                  <span className="min-w-0 flex-1 truncate">{m.modelLabel}</span>
+                  {active && <TbCheck className="shrink-0 text-[12px]" aria-hidden />}
                 </button>
               </li>
             )
@@ -371,30 +465,6 @@ function ForecastRow ({ element, activeDef, levels, activeLevel, onLevel, visibl
   )
 }
 
-// One model, as a radio-like button in the selector. Filled when active, dimmed
-// and disabled until its cycle is ingested.
-function ModelChip ({ model, active, available, onSelect }) {
-  return (
-    <button
-      type="button"
-      onClick={available ? () => onSelect(model.modelId) : undefined}
-      disabled={!available}
-      title={available ? model.modelFull : `${model.modelFull} (no cycle ingested yet)`}
-      aria-pressed={active}
-      className={`flex items-center justify-center gap-1 rounded-cb-sm border px-2 py-1 text-[10.5px] font-semibold transition-colors ${
-        active
-          ? 'border-primary bg-primary-soft text-primary'
-          : available
-            ? 'border-border bg-panel-2 text-text-2 hover:border-border-strong hover:text-text'
-            : 'cursor-not-allowed border-border bg-panel-2 text-muted opacity-55'
-      }`}
-    >
-      {!available && <TbClockPause className="text-[11px]" aria-hidden />}
-      <span className="truncate">{model.modelLabel}</span>
-    </button>
-  )
-}
-
 // A collapsible group. The header carries the section name, a count and a chevron
 // that turns the whole group off screen without losing its state.
 function Section ({ label, count, children, defaultOpen = true, right }) {
@@ -439,11 +509,13 @@ export default function LayersPanel ({
   collapsed,
   onCollapse
 }) {
-  // Split the raster layers into their behavioural groups.
-  const pmdLayers = rasterLayers.filter((l) => l.source === 'pmd')
-  const analysisLayers = rasterLayers.filter((l) => l.bandDriven || l.source === 'computed')
+  // Split the raster layers into their behavioural groups. A forecast layer is
+  // any that names a model (PMD or GFS); those are grouped under the model
+  // selector. The rest are terrain (static) or analysis (computed).
+  const forecastLayers = rasterLayers.filter((l) => l.modelId)
+  const analysisLayers = rasterLayers.filter((l) => !l.modelId && (l.bandDriven || l.source === 'computed'))
   const terrainLayers = rasterLayers.filter(
-    (l) => l.source !== 'pmd' && !l.bandDriven && l.source !== 'computed'
+    (l) => !l.modelId && !l.bandDriven && l.source !== 'computed'
   )
 
   const toggleable = [...layers, ...rasterLayers.filter((l) => availability[l.id]?.ok)]
@@ -453,15 +525,15 @@ export default function LayersPanel ({
   // Models, in contract order, each with whether it has any available layer.
   const models = []
   const seen = new Set()
-  for (const l of pmdLayers) {
+  for (const l of forecastLayers) {
     if (seen.has(l.modelId)) continue
     seen.add(l.modelId)
     models.push({ modelId: l.modelId, modelLabel: l.modelLabel, modelFull: l.modelFull, model: l.model })
   }
-  const modelAvailable = (modelId) => pmdLayers.some((l) => l.modelId === modelId && availability[l.id]?.ok)
+  const modelAvailable = (modelId) => forecastLayers.some((l) => l.modelId === modelId && availability[l.id]?.ok)
 
   // The active model's fields, grouped by element, each sorted by level.
-  const activeModelLayers = pmdLayers.filter((l) => l.modelId === activeModelId)
+  const activeModelLayers = forecastLayers.filter((l) => l.modelId === activeModelId)
   const elementOrder = []
   const byElement = new Map()
   for (const l of activeModelLayers) {
@@ -546,17 +618,12 @@ export default function LayersPanel ({
           {models.length > 0 && (
             <Section label="Forecast models" count={elementOrder.length}>
               <li className="border-b border-border/60 px-2 py-2">
-                <div className="grid grid-cols-2 gap-1.5">
-                  {models.map((m) => (
-                    <ModelChip
-                      key={m.modelId}
-                      model={m}
-                      active={m.modelId === activeModelId}
-                      available={modelAvailable(m.modelId)}
-                      onSelect={onSelectModel}
-                    />
-                  ))}
-                </div>
+                <ModelSelect
+                  models={models}
+                  value={activeModelId}
+                  available={modelAvailable}
+                  onSelect={onSelectModel}
+                />
               </li>
 
               {elementOrder.map((el) => {

@@ -303,6 +303,29 @@
       "min": -20, "max": 30,
       "palette": "plasma",
       "legendTitle": "Temperature 850hPa (C)"
+    },
+    {
+      "$gfsWindComment": "GFS u and v wind components at 850 hPa, kept internal. They are not map layers; they exist so the wind-field endpoint can recover direction for the barb overlay, which needs the vectors, not just the wind_speed_pl850 magnitude. Ingested by scripts/ingest/ingest_gfs.py under model GFS.",
+      "key": "wind_u_pl850",
+      "label": "Wind U 850 hPa",
+      "unit": "m/s",
+      "category": "dynamics",
+      "temporal": true,
+      "internal": true,
+      "min": -60, "max": 60,
+      "palette": "continuous",
+      "legendTitle": "Wind U 850hPa (m/s)"
+    },
+    {
+      "key": "wind_v_pl850",
+      "label": "Wind V 850 hPa",
+      "unit": "m/s",
+      "category": "dynamics",
+      "temporal": true,
+      "internal": true,
+      "min": -60, "max": 60,
+      "palette": "continuous",
+      "legendTitle": "Wind V 850hPa (m/s)"
     }
   ]
 }

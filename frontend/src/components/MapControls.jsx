@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   TbPlus, TbMinus, TbNavigation, TbWorld, TbMap2,
-  TbFocusCentered, TbCurrentLocation, TbChevronDown, TbStack2
+  TbFocusCentered, TbCurrentLocation, TbChevronDown, TbStack2, TbInfoCircle
 } from 'react-icons/tb'
 
 import BasemapMenu, { iconFor } from './BasemapMenu'
@@ -58,7 +58,9 @@ export default function MapControls ({
   basemaps,
   activeBasemap,
   onSelectBasemap,
-  tokenMissing
+  tokenMissing,
+  identifyActive,
+  onToggleIdentify
 }) {
   // Expanded by default. Zoom is the most used control on any map and hiding it
   // behind a click was the wrong default; the chevron is there to tuck the
@@ -67,7 +69,17 @@ export default function MapControls ({
   const [basemapOpen, setBasemapOpen] = useState(false)
   const [bearing, setBearing] = useState(0)
   const [pitch, setPitch] = useState(0)
+  // Clip the stack while it is collapsed or mid-glide, so the height animation
+  // has something to hide behind; freed once fully open so the basemap flyout is
+  // not cut off. Starts unclipped because the stack starts open.
+  const [clip, setClip] = useState(false)
   const rootRef = useRef(null)
+
+  // Collapsing clips immediately; expanding waits for the glide to finish before
+  // unclipping (see onTransitionEnd on the stack).
+  useEffect(() => {
+    if (!open) setClip(true)
+  }, [open])
 
   useEffect(() => {
     if (!map) return
@@ -117,8 +129,20 @@ export default function MapControls ({
         />
       </ControlGroup>
 
-      {open && (
-        <>
+      {/* The stack glides open and shut: the grid row animates the height while a
+          fade and a slight zoom play from the top-right corner. Rendered always,
+          not mounted on demand, so both directions animate. overflow is clipped
+          only while collapsed or mid-glide, then freed once open so the basemap
+          flyout, which extends left out of the stack, is not cut off. */}
+      <div
+        onTransitionEnd={(e) => { if (e.propertyName === 'grid-template-rows' && open) setClip(false) }}
+        className={`grid origin-top-right transition-all duration-300 ease-out ${
+          open
+            ? 'grid-rows-[1fr] scale-100 opacity-100'
+            : 'pointer-events-none grid-rows-[0fr] scale-95 opacity-0'
+        }`}
+      >
+        <div className={`flex flex-col items-end gap-2 ${clip ? 'overflow-hidden' : ''}`}>
           <ControlGroup>
             <IconButton icon={TbPlus} label="Zoom in" onClick={() => map?.zoomIn({ duration: 250 })} />
             <IconButton icon={TbMinus} label="Zoom out" onClick={() => map?.zoomOut({ duration: 250 })} />
@@ -144,6 +168,14 @@ export default function MapControls ({
 
           <ControlGroup>
             <IconButton icon={TbCurrentLocation} label="Go to my location" onClick={onLocate} />
+            {/* Identify: click the map to read the topmost raster's value at that
+                pixel. A tool, so it stays pressed while armed. */}
+            <IconButton
+              icon={TbInfoCircle}
+              label={identifyActive ? 'Identify tool on, click the map' : 'Identify raster value'}
+              active={identifyActive}
+              onClick={onToggleIdentify}
+            />
           </ControlGroup>
 
           {/* Basemap. The list opens to the left, because this sits against the
@@ -172,8 +204,8 @@ export default function MapControls ({
               </div>
             )}
           </div>
-        </>
-      )}
+        </div>
+      </div>
     </div>
   )
 }

@@ -13,6 +13,7 @@ import FeaturePanel from '@/components/FeaturePanel'
 import LayersPanel from '@/components/LayersPanel'
 import MapControls from '@/components/MapControls'
 import Navbar from '@/components/Navbar'
+import RasterPanel from '@/components/RasterPanel'
 import StatusBanner from '@/components/StatusBanner'
 import TimeSlider from '@/components/TimeSlider'
 import MapView from '@/features/map/MapView'
@@ -20,7 +21,7 @@ import { useContracts } from '@/hooks/useContracts'
 import { useForecast } from '@/hooks/useForecast'
 import { useRasterAvailability } from '@/hooks/useRasterAvailability'
 import { useTheme } from '@/hooks/useTheme'
-import { getLayerExtent } from '@/lib/api'
+import { getLayerExtent, getRasterPoint } from '@/lib/api'
 import { availableBasemaps, defaultBasemapId, hasMapboxToken } from '@/lib/basemaps'
 import { contracts, rasterScale } from '@/lib/contracts'
 import { DEFAULT_BOUNDS, fitToBounds, fitToExtent } from '@/lib/map'
@@ -61,6 +62,9 @@ export default function App () {
   const [playing, setPlaying] = useState(false)
   const [activeModelId, setActiveModelId] = useState(null)
   const [levelChoice, setLevelChoice] = useState({})
+  const [identify, setIdentify] = useState(false)
+  const [rasterSelection, setRasterSelection] = useState(null)
+  const identifyReqRef = useRef(0)
   const initialBasemapRef = useRef(null)
 
   const ready = contractState.status === 'ready'
@@ -77,7 +81,7 @@ export default function App () {
     const out = []
     const seen = new Set()
     for (const l of rasterLayers) {
-      if (l.source !== 'pmd' || seen.has(l.modelId)) continue
+      if (!l.modelId || seen.has(l.modelId)) continue
       seen.add(l.modelId)
       out.push({ modelId: l.modelId, model: l.model, modelLabel: l.modelLabel })
     }
@@ -91,7 +95,7 @@ export default function App () {
   useEffect(() => {
     if (activeModelId || forecastModels.length === 0) return
     const withCycle = forecastModels.find((m) =>
-      rasterLayers.some((l) => l.source === 'pmd' && l.modelId === m.modelId && availability[l.id]?.ok)
+      rasterLayers.some((l) => l.modelId === m.modelId && availability[l.id]?.ok)
     )
     setActiveModelId((withCycle ?? forecastModels[0]).modelId)
   }, [activeModelId, forecastModels, rasterLayers, availability])
@@ -165,7 +169,7 @@ export default function App () {
     setVisibleLayers(new Set([
       ...layers.map((l) => l.id),
       ...rasterLayers
-        .filter((l) => availability[l.id]?.ok && (l.source !== 'pmd' || l.modelId === activeModelId))
+        .filter((l) => availability[l.id]?.ok && (!l.modelId || l.modelId === activeModelId))
         .map((l) => l.id)
     ]))
   }, [layers, rasterLayers, availability, activeModelId])
@@ -179,7 +183,7 @@ export default function App () {
     setVisibleLayers((current) => {
       const next = new Set(current)
       for (const l of rasterLayers) {
-        if (l.source === 'pmd' && l.modelId !== modelId) next.delete(l.id)
+        if (l.modelId && l.modelId !== modelId) next.delete(l.id)
       }
       return next
     })
@@ -192,7 +196,7 @@ export default function App () {
     setLevelChoice((current) => ({ ...current, [`${modelId}:${element}`]: level }))
     setVisibleLayers((current) => {
       const variants = rasterLayers.filter(
-        (l) => l.source === 'pmd' && l.modelId === modelId && l.element === element
+        (l) => l.modelId === modelId && l.element === element
       )
       const shown = variants.find((v) => current.has(v.id))
       const target = variants.find((v) => v.level === level)
@@ -235,6 +239,49 @@ export default function App () {
       () => {}
     )
   }, [map])
+
+  // Arm or disarm the identify tool. Disarming clears any open value popup, so
+  // the tool and its result turn off together.
+  const toggleIdentify = useCallback(() => {
+    setIdentify((on) => {
+      if (on) setRasterSelection(null)
+      return !on
+    })
+  }, [])
+
+  // Read the value of the topmost raster at a clicked point. The layer id comes
+  // from the map's draw order; everything else, the model, cycle and lead, is
+  // what the map is currently showing, so the number matches the pixel.
+  const onIdentify = useCallback(async ({ layerId, lng, lat }) => {
+    const def = rasterLayers.find((l) => l.id === layerId)
+    if (!def) {
+      setRasterSelection(null)
+      return
+    }
+    const reqId = ++identifyReqRef.current
+    // Keep the open card and its current value while the next pixel loads, so a
+    // new click updates the card in place instead of blanking and reflowing it.
+    // Only the very first open shows a loading state, since there is nothing to
+    // keep yet; the swap to the new value happens atomically on arrival.
+    setRasterSelection((prev) => (prev ? { ...prev, status: 'updating' } : { def, lng, lat, status: 'loading' }))
+    try {
+      const data = await getRasterPoint(def.id, {
+        model: def.model,
+        creationTime: def.temporal ? forecast.creationTime : undefined,
+        leadHours: def.temporal ? activeLead : undefined,
+        lon: lng,
+        lat
+      })
+      if (identifyReqRef.current !== reqId) return
+      setRasterSelection({
+        def, lng, lat, status: 'ok',
+        value: data.value, unit: data.unit, legendTitle: data.legendTitle, leadHours: data.leadHours
+      })
+    } catch {
+      if (identifyReqRef.current !== reqId) return
+      setRasterSelection({ def, lng, lat, status: 'error' })
+    }
+  }, [rasterLayers, forecast.creationTime, activeLead])
 
   if (contractState.status === 'loading') {
     return (
@@ -296,6 +343,8 @@ export default function App () {
           projection={projection}
           creationTime={forecast.creationTime}
           leadHours={activeLead}
+          identify={identify}
+          onIdentify={onIdentify}
           onMapReady={setMap}
           onSelectFeature={setSelection}
         />
@@ -331,6 +380,7 @@ export default function App () {
 
             <div className="flex items-start gap-3">
               {selection && <FeaturePanel selection={selection} onClose={() => setSelection(null)} />}
+              {rasterSelection && <RasterPanel selection={rasterSelection} onClose={() => setRasterSelection(null)} />}
               <MapControls
                 map={map}
                 projection={projection}
@@ -341,6 +391,8 @@ export default function App () {
                 activeBasemap={activeBasemap}
                 onSelectBasemap={setBasemap}
                 tokenMissing={!hasMapboxToken()}
+                identifyActive={identify}
+                onToggleIdentify={toggleIdentify}
               />
             </div>
           </div>

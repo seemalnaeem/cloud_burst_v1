@@ -18,12 +18,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
+import { getWindField } from '@/lib/api'
 import { mapboxToken, styleUrl } from '@/lib/basemaps'
 import {
   DEFAULT_CENTER, DEFAULT_ZOOM,
   addRasterLayer, addVectorLayer, layerIdsFor, removeRasterLayer,
   setLayerOpacity, setLayerVisible, setRasterOpacity, setRasterTime
 } from '@/lib/map'
+import { removeWindBarbs, setWindBarbs } from '@/lib/windBarbs'
 
 mapboxgl.accessToken = mapboxToken()
 
@@ -36,6 +38,8 @@ export default function MapView ({
   projection,
   creationTime = null,
   leadHours = null,
+  identify = false,
+  onIdentify,
   onMapReady,
   onSelectFeature,
   onHoverFeature
@@ -45,6 +49,8 @@ export default function MapView ({
   const hoveredRef = useRef(null)
   const selectedRef = useRef(null)
   const styledWithRef = useRef(null)
+  const barbAbortRef = useRef(null)
+  const renderBarbsRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [failure, setFailure] = useState(null)
 
@@ -107,6 +113,9 @@ export default function MapView ({
     // Fires on first load and after every setStyle.
     map.on('style.load', () => {
       installLayers()
+      // A style rebuild drops our images, sources and layers, so the barb
+      // overlay has to be put back too. The effect below owns the latest render.
+      renderBarbsRef.current?.()
       setReady(true)
       onMapReady?.(map)
     })
@@ -138,6 +147,9 @@ export default function MapView ({
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
+    // The identify tool owns the click while it is armed, so vector selection
+    // and hover step aside rather than fighting it for the same click.
+    if (identify) return
 
     const clickable = layers.filter((l) => l.clickable)
     const targets = clickable
@@ -218,7 +230,39 @@ export default function MapView ({
       map.off('click', onClick)
       map.getCanvas().removeEventListener('mouseout', onLeaveCanvas)
     }
-  }, [ready, layers, visibleLayers, onSelectFeature, onHoverFeature])
+  }, [ready, layers, visibleLayers, onSelectFeature, onHoverFeature, identify])
+
+  // ------------------------------------------------------------- identify
+  //
+  // When armed, a click reads the topmost raster on the map at that point. The
+  // topmost is the last raster in draw order: rasters are inserted just beneath
+  // the vectors in the order they are switched on, so the most recently added is
+  // the highest. The layer id maps straight back to a contract def upstream.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready || !identify) return
+
+    const canvas = map.getCanvas()
+    canvas.style.cursor = 'crosshair'
+
+    const topRasterLayerId = () => {
+      const style = map.getStyle()
+      if (!style) return null
+      const rasters = style.layers.filter((l) => l.type === 'raster' && l.id.startsWith('raster-'))
+      const top = rasters[rasters.length - 1]
+      return top ? top.id.slice('raster-'.length) : null
+    }
+
+    const onClick = (e) => {
+      onIdentify?.({ layerId: topRasterLayerId(), lng: e.lngLat.lng, lat: e.lngLat.lat })
+    }
+
+    map.on('click', onClick)
+    return () => {
+      map.off('click', onClick)
+      canvas.style.cursor = ''
+    }
+  }, [ready, identify, onIdentify])
 
   // ------------------------------------------------------------- visibility
   useEffect(() => {
@@ -278,6 +322,45 @@ export default function MapView ({
         setRasterTime(map, def, { creationTime, leadHours })
       }
     })
+  }, [ready, rasterLayers, visibleLayers, creationTime, leadHours])
+
+  // ------------------------------------------------------------- wind barbs
+  //
+  // A layer flagged `barbs` in the contract (the GFS wind layer) draws a
+  // directional overlay on top of its speed raster. The barbs need the wind
+  // vectors, so this fetches a coarse u/v grid from the API for the active
+  // model, cycle and lead, and refetches when any of those change; scrubbing the
+  // slider reorients the whole field. The render is stored in a ref so the
+  // style.load handler can rebuild it after a basemap switch.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+
+    const def = rasterLayers.find((l) => l.barbs && visibleLayers.has(l.id))
+
+    const render = async () => {
+      const m = mapRef.current
+      if (!m) return
+      if (!def || creationTime == null || leadHours == null) {
+        removeWindBarbs(m)
+        return
+      }
+      barbAbortRef.current?.abort()
+      const ac = new AbortController()
+      barbAbortRef.current = ac
+      try {
+        const fc = await getWindField(def.model, creationTime, leadHours, ac.signal)
+        if (ac.signal.aborted || !mapRef.current) return
+        setWindBarbs(mapRef.current, fc)
+      } catch (err) {
+        if (err.name !== 'AbortError') removeWindBarbs(mapRef.current)
+      }
+    }
+
+    renderBarbsRef.current = render
+    render()
+
+    return () => barbAbortRef.current?.abort()
   }, [ready, rasterLayers, visibleLayers, creationTime, leadHours])
 
   // ------------------------------------------------------------- basemap

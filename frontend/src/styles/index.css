@@ -95,23 +95,33 @@ textarea {
   outline-offset: 2px;
 }
 
-/* Custom scrollbars for the sidebar and legend panels. */
-.cb-scroll::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/*
+  Custom scrollbars, everywhere and in both themes.
+
+  Applied to every element rather than a single class, so a scroll container
+  added anywhere in the app gets the same thin bar without opting in. 3px wide,
+  a rounded thumb in the theme's strong-border colour that darkens to the muted
+  colour on hover, and no track. Both colours are theme tokens, so the bar
+  follows light and dark automatically. Firefox has no per-pixel width, so it
+  gets `thin`, the closest it offers, and the same thumb colour.
+*/
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cb-border-strong) transparent;
 }
-.cb-scroll::-webkit-scrollbar-track {
+*::-webkit-scrollbar {
+  width: 0.5px;
+  height: 0.5px;
+}
+*::-webkit-scrollbar-track {
   background: transparent;
 }
-.cb-scroll::-webkit-scrollbar-thumb {
-  background: #d3d9e2;
-  border-radius: 4px;
-}
-.cb-scroll::-webkit-scrollbar-thumb:hover {
-  background: #bcc4d0;
-}
-:root[data-theme='dark'] .cb-scroll::-webkit-scrollbar-thumb {
+*::-webkit-scrollbar-thumb {
   background: var(--cb-border-strong);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--cb-muted);
 }
 
 /* Section header. Flat fills only.

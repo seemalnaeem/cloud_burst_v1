@@ -148,10 +148,24 @@ def probe(pmd: Pmd, plan: dict[str, dict]) -> int:
     return 0
 
 
-def lead_hours(data_time: str, forecast_time: str) -> int:
-    a = datetime.fromisoformat(data_time.replace("Z", "+00:00"))
+def lead_from_cycle(cycle: datetime, forecast_time: str) -> int:
+    """Hours from the model cycle to a step's valid time.
+
+    The lead is measured against the model's cycle, not the field's own
+    initialization. Some fields, HOURTPE and TPE especially, are carried over
+    from an earlier run and so are initialized 12 or 24 hours before the model's
+    main cycle. Measuring their lead from their own init put them on a shifted
+    grid that did not line up with the cycle the slider scrubs, so a request for
+    a normal lead found no tile and the map showed a 502. Measuring every field
+    from the one cycle keeps them all on the same timeline. Steps that fall
+    before the cycle come out negative and are dropped by the caller.
+    """
     b = datetime.fromisoformat(forecast_time.replace("Z", "+00:00"))
-    return int((b - a).total_seconds() // 3600)
+    # forecast_time comes without an offset, so it parses naive; the cycle is
+    # tz-aware from parse_cycle. Tag the step UTC so the two can be subtracted.
+    if b.tzinfo is None:
+        b = b.replace(tzinfo=timezone.utc)
+    return int((b - cycle).total_seconds() // 3600)
 
 
 def parse_cycle(data_time: str) -> datetime:
@@ -190,6 +204,10 @@ def catalogue(env: dict, model: str, band_key: str, cycle: datetime, lead: int, 
 def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | None) -> int:
     """Ingest every field of one model. Returns the number of steps catalogued."""
     log(f"[{dt}] {entry['label']}, {len(entry['items'])} fields")
+    # Rebuild the model from scratch, so a re-run that changes how a lead is
+    # computed cannot leave stale rows at the old lead. Only this model's rows go;
+    # other models and the static terrain rows are untouched.
+    psql(f"DELETE FROM wx.raster_catalog WHERE model = '{dt}'", env)
     cycle_dt: datetime | None = None
     all_leads: list[int] = []
     total = 0
@@ -215,33 +233,57 @@ def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | Non
         # first field that returns data, then refine published_leads at the end.
         if cycle_dt is None:
             cycle_dt = parse_cycle(records[0]["data_time"])
-            field_leads = [lead_hours(r["data_time"], r["forecast_time"]) for r in records]
+            field_leads = [x for r in records if (x := lead_from_cycle(cycle_dt, r["forecast_time"])) >= 0]
             register_cycle(env, dt, cycle_dt, field_leads)
 
         step = time.time()
         done = 0
         for rec in records:
-            lead = lead_hours(rec["data_time"], rec["forecast_time"])
-            raw = settings.tmp_dir / f"pmd_raw_{dt}_{band_key}_{lead}.tif"
-            clipped = settings.tmp_dir / f"pmd_clip_{dt}_{band_key}_{lead}.tif"
-            target = settings.cog_dir / f"{dt}_{band_key}_{cycle_dt:%Y%m%d%H}_t{lead:03d}.tif"
-
-            pmd.download(rec["file_path"], raw)
-            # Clip the Asia-wide field to the national boundary, so the temporal
-            # layers share the terrain layers' clean edge and carry far fewer
-            # pixels than the raw continental tile.
-            clip_to_boundary(raw, clipped, CUTLINE, -9999)
-            to_cog(clipped, target, tmp_dir=settings.tmp_dir, float_data=is_float_raster(clipped))
-            raw.unlink(missing_ok=True)
-            clipped.unlink(missing_ok=True)
-
-            if not validate_cog(target):
-                log(f"  {element} {level} lead {lead}: COG validation failed, skipping")
+            lead = lead_from_cycle(cycle_dt, rec["forecast_time"])
+            # Steps valid before the model cycle are history from a carried-over
+            # field; they are not on the forecast timeline, so drop them.
+            if lead < 0:
                 continue
+            # One step failing, most often a transient bind-mount permission blip
+            # on /data/tmp under heavy IO, must not abort the whole run. Skip it;
+            # the next run fills the gap, this script being idempotent.
+            try:
+                raw = settings.tmp_dir / f"pmd_raw_{dt}_{band_key}_{lead}.tif"
+                clipped = settings.tmp_dir / f"pmd_clip_{dt}_{band_key}_{lead}.tif"
+                target = settings.cog_dir / f"{dt}_{band_key}_{cycle_dt:%Y%m%d%H}_t{lead:03d}.tif"
 
-            catalogue(env, dt, band_key, cycle_dt, lead, target, spec)
-            all_leads.append(lead)
-            done += 1
+                pmd.download(rec["file_path"], raw)
+                # Guard against degenerate source rasters. PMD sometimes serves a
+                # field as a one-row strip rather than a grid (ICON DPT, RHU and
+                # TEM came back 561x1 for this cycle); clipping that produces an
+                # almost empty layer that renders as a flat rectangle over the
+                # whole bounding box. Skip it so the layer stays disabled and
+                # honestly pending rather than showing broken data.
+                probe = gdal.Open(str(raw))
+                sw, sh = probe.RasterXSize, probe.RasterYSize
+                probe = None
+                if sw < 2 or sh < 2:
+                    raw.unlink(missing_ok=True)
+                    log(f"  {element} {level} lead {lead}: degenerate source {sw}x{sh}, skipping")
+                    continue
+                # Clip the Asia-wide field to the national boundary, so the
+                # temporal layers share the terrain layers' clean edge and carry
+                # far fewer pixels than the raw continental tile.
+                clip_to_boundary(raw, clipped, CUTLINE, -9999)
+                to_cog(clipped, target, tmp_dir=settings.tmp_dir, float_data=is_float_raster(clipped))
+                raw.unlink(missing_ok=True)
+                clipped.unlink(missing_ok=True)
+
+                if not validate_cog(target):
+                    log(f"  {element} {level} lead {lead}: COG validation failed, skipping")
+                    continue
+
+                catalogue(env, dt, band_key, cycle_dt, lead, target, spec)
+                all_leads.append(lead)
+                done += 1
+            except Exception as exc:
+                log(f"  {element} {level} lead {lead}: {type(exc).__name__} {exc}, skipping")
+                continue
 
         lvl = "sfc" if level == 0 else f"{level}hPa"
         log(f"  {element:8} {lvl:7} -> {band_key:14} {done:3} steps in {time.time() - step:.0f}s")

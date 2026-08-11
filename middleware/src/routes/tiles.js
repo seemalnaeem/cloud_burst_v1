@@ -95,13 +95,16 @@ tilesRouter.get('/raster/:layer/:z/:x/:y.png', async (req, res, next) => {
     if (req.query.creation_time) resolveUrl.searchParams.set('creation_time', String(req.query.creation_time))
     if (req.query.lead) resolveUrl.searchParams.set('lead', String(req.query.lead))
 
-    const resolved = await http.getJson(resolveUrl.toString(), { timeoutMs: 15000 })
+    // 501 (NOT_CONFIGURED) is allowed through: a temporal layer legitimately has
+    // no tile at some cycles and leads (a field can be initialised on a different
+    // run than the model's main cycle, so it does not cover every step). That is
+    // an empty tile, exactly like a 404 from the tiler, not a 502 error banner.
+    const resolved = await http.getJson(resolveUrl.toString(), { timeoutMs: 15000, allowStatus: [501] })
 
     if (!resolved?.path) {
-      throw new AppError(
-        'NOT_CONFIGURED',
-        `No raster catalogued for layer ${id}${bandKey ? ` band ${bandKey}` : ''} at that cycle and lead.`
-      )
+      res.setHeader('Content-Type', 'image/png')
+      res.setHeader('Cache-Control', config.cacheControl.rasterTiles)
+      return res.status(200).end(EMPTY_TILE)
     }
 
     const tileUrl = new URL(`${config.upstreams.raster}/cog/tiles/WebMercatorQuad/${z}/${x}/${y}.png`)

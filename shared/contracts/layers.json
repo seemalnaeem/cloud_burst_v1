@@ -977,6 +977,79 @@
         "render": "steps",
         "description": "Precipitation over the single step, surface, from ECMWF-IFS"
       }
+    },
+    {
+      "id": "gfs_wind_850",
+      "label": "Wind Speed",
+      "source": "gfs",
+      "model": "GFS",
+      "modelId": "gfs",
+      "modelLabel": "NOAA GFS",
+      "modelFull": "NOAA GFS 0.25 deg",
+      "element": "WIND",
+      "level": 850,
+      "levelLabel": "850 hPa",
+      "band": "wind_speed_pl850",
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "continuous",
+      "color": "#0284c7",
+      "opacity": 0.72,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Wind speed from u and v, 850 hPa, from NOAA GFS"
+      },
+      "barbs": true
+    },
+    {
+      "id": "gfs_vvel_700",
+      "label": "Vertical Velocity",
+      "source": "gfs",
+      "model": "GFS",
+      "modelId": "gfs",
+      "modelLabel": "NOAA GFS",
+      "modelFull": "NOAA GFS 0.25 deg",
+      "element": "VVEL",
+      "level": 700,
+      "levelLabel": "700 hPa",
+      "band": "vertical_velocity_pl700",
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "continuous",
+      "color": "#6366f1",
+      "opacity": 0.72,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Vertical velocity, negative is upward, 700 hPa, from NOAA GFS"
+      }
+    },
+    {
+      "id": "gfs_vvel_500",
+      "label": "Vertical Velocity",
+      "source": "gfs",
+      "model": "GFS",
+      "modelId": "gfs",
+      "modelLabel": "NOAA GFS",
+      "modelFull": "NOAA GFS 0.25 deg",
+      "element": "VVEL",
+      "level": 500,
+      "levelLabel": "500 hPa",
+      "band": "vertical_velocity_pl500",
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "continuous",
+      "color": "#6366f1",
+      "opacity": 0.72,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Vertical velocity, negative is upward, 500 hPa, from NOAA GFS"
+      }
     }
   ],
   "$forecastNote": "Forecast raster layers are expanded per model, per element and per level. id is modelId_element[_level]; band carries the display range and palette; model is the PMD data_type the tile is resolved against. The panel groups these by model and collapses an element that has several levels into one row with a level selector. One model is active at a time and drives the time slider. See scripts/ingest/ingest_pmd.py."

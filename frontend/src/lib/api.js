@@ -121,6 +121,13 @@ export const getPrioritized = (top, signal) =>
 // enabled state of the raster rows in the layers panel, so an uningested source
 // reads as pending rather than as a toggle that does nothing.
 export const getRasterCatalog = (signal) => api.get('/api/raster/catalog', null, { signal })
+// A coarse wind-vector grid for the barb overlay: points with a from-direction
+// and a 5-knot bucket, sampled from the model's u/v at 850 for a cycle and lead.
+export const getWindField = (model, creationTime, leadHours, signal) =>
+  api.get('/api/raster/windfield', { model, creation_time: creationTime, lead: leadHours }, { signal })
+// The value of one raster layer at a coordinate, for the identify tool.
+export const getRasterPoint = (layer, { model, creationTime, leadHours, lon, lat } = {}, signal) =>
+  api.get('/api/raster/point', { layer, model, creation_time: creationTime, lead: leadHours, lon, lat }, { signal })
 
 export const getAlerts = (signal) => api.get('/api/alerts', null, { signal })
 export const getUpstreamStatus = (signal) => api.get('/api/upstream/status', null, { signal })

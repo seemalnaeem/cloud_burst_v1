@@ -40,14 +40,18 @@ async function call (url, { method = 'GET', headers = {}, timeoutMs, body } = {}
 
 export async function getJson (url, options = {}) {
   const res = await call(url, options)
+  const allowed = options.allowStatus ?? []
 
-  if (res.statusCode >= 400) {
+  if (res.statusCode >= 400 && !allowed.includes(res.statusCode)) {
     // Log the body, do not forward it. An upstream error page can contain
     // internal hostnames and stack traces.
     const text = await res.body.text().catch(() => '')
     logger.warn({ url, status: res.statusCode, body: text.slice(0, 500) }, 'upstream error')
     throw new AppError('UPSTREAM_ERROR', `Upstream returned ${res.statusCode}.`, { url })
   }
+  // An allowed status still parses: the error envelope is JSON, and the caller
+  // inspects it (a resolve 501 means "no tile for this layer, cycle and lead",
+  // which for a temporal layer is a fact, not a failure).
 
   const contentType = res.headers['content-type'] || ''
   if (!contentType.includes('json')) {

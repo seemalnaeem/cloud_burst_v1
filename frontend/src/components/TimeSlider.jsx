@@ -15,7 +15,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import {
-  TbPlayerPlayFilled, TbPlayerPauseFilled, TbChevronLeft, TbChevronRight
+  TbPlayerPlayFilled, TbPlayerPauseFilled, TbPlayerSkipBackFilled, TbChevronLeft, TbChevronRight
 } from 'react-icons/tb'
 
 import { IconButton } from './ui/Panel'
@@ -68,6 +68,8 @@ export default function TimeSlider ({
   activeLayers = []  // labels of temporal layers currently shown
 }) {
   const timer = useRef(null)
+  const trackRef = useRef(null)
+  const draggingRef = useRef(false)
   const [speed, setSpeed] = useState(1)
   const count = leads.length
   const lead = leads[index] ?? 0
@@ -98,11 +100,43 @@ export default function TimeSlider ({
 
   const cycleSpeed = () => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])
 
+  // Pointer dragging, so the dot can be grabbed and slid along the track and a
+  // press anywhere on the bar jumps to that step. Pointer capture keeps the drag
+  // alive even when the cursor leaves the track, and the x is snapped to the
+  // nearest published step so the thumb always lands on a real tick.
+  const seek = (clientX) => {
+    const el = trackRef.current
+    if (!el || count <= 1) return
+    const rect = el.getBoundingClientRect()
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+    onIndex(Math.round(ratio * (count - 1)))
+  }
+  const onPointerDown = (e) => {
+    if (count <= 1) return
+    draggingRef.current = true
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+    seek(e.clientX)
+  }
+  const onPointerMove = (e) => { if (draggingRef.current) seek(e.clientX) }
+  const endDrag = (e) => {
+    if (!draggingRef.current) return
+    draggingRef.current = false
+    e.currentTarget.releasePointerCapture?.(e.pointerId)
+  }
+  const onKeyDown = (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { onIndex((i) => Math.max(0, i - 1)); e.preventDefault() }
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { onIndex((i) => Math.min(count - 1, i + 1)); e.preventDefault() }
+    else if (e.key === 'Home') { onIndex(0); e.preventDefault() }
+    else if (e.key === 'End') { onIndex(count - 1); e.preventDefault() }
+  }
+
   return (
     <div className="pointer-events-auto w-[min(920px,calc(100vw-2rem))] rounded-cb border border-border bg-panel px-3 py-2.5 shadow-cb-lg">
       <div className="flex items-center gap-3">
         {/* Transport */}
         <div className="flex shrink-0 items-center gap-1">
+          <IconButton icon={TbPlayerSkipBackFilled} label="Reset to start" size="sm" tone="ghost"
+            onClick={() => onIndex(0)} disabled={index === 0} />
           <IconButton icon={TbChevronLeft} label="Previous step" size="sm" tone="ghost"
             onClick={() => onIndex((i) => Math.max(0, i - 1))} disabled={index === 0} />
           <IconButton icon={playing ? TbPlayerPauseFilled : TbPlayerPlayFilled}
@@ -127,17 +161,34 @@ export default function TimeSlider ({
           </button>
         </div>
 
-        {/* Scrubber, drawn. */}
-        <div className="relative h-6 min-w-0 flex-1">
+        {/* Scrubber, drawn. The container is the slider: it takes the pointer and
+            keyboard directly, so the dot can be grabbed and dragged and a press
+            on the bar seeks. touch-none stops the page scrolling under a drag. */}
+        <div
+          ref={trackRef}
+          role="slider"
+          tabIndex={0}
+          aria-label="Forecast lead time"
+          aria-valuemin={0}
+          aria-valuemax={count - 1}
+          aria-valuenow={index}
+          aria-valuetext={leadText(lead)}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onKeyDown={onKeyDown}
+          className="relative h-6 min-w-0 flex-1 cursor-pointer touch-none select-none outline-none"
+        >
           {/* Base bar, centered. */}
-          <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-[var(--cb-track)]" />
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-[var(--cb-track)]" />
           {/* Elapsed fill. */}
-          <div className="absolute left-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-primary" style={{ width: `${pct}%` }} />
+          <div className="pointer-events-none absolute left-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-primary" style={{ width: `${pct}%` }} />
           {/* Ticks. Major cross the bar taller than minor; both colour once elapsed. */}
           {ticks.map((t) => (
             <span
               key={t.i}
-              className="absolute top-1/2 w-px -translate-x-1/2 -translate-y-1/2 rounded-full"
+              className="pointer-events-none absolute top-1/2 w-px -translate-x-1/2 -translate-y-1/2 rounded-full"
               style={{
                 left: `${t.pct}%`,
                 height: t.major ? '11px' : '5px',
@@ -147,20 +198,11 @@ export default function TimeSlider ({
               }}
             />
           ))}
-          {/* Thumb, centered on the bar and on the current step. */}
+          {/* Thumb, centered on the bar and on the current step. Reads as a grab
+              handle; the container does the actual dragging. */}
           <div
             className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-primary bg-panel"
             style={{ left: `${pct}%`, boxShadow: '0 1px 3px rgba(16,24,40,0.35)' }}
-          />
-          {/* Interaction only: an invisible native range for drag and keyboard. */}
-          <input
-            type="range"
-            min="0"
-            max={count - 1}
-            value={index}
-            onChange={(e) => onIndex(Number(e.target.value))}
-            aria-label="Forecast lead time"
-            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
           />
         </div>
 

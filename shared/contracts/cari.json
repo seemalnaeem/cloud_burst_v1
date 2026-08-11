@@ -2,57 +2,380 @@
   "$comment": "CARI scoring contract. Values transcribed from DATA_SOURCES.md section 9.1. Where the old code and old comments disagreed, section 12 says the code values are correct and those are what appear here. Do not retype any of this into source code.",
   "version": 1,
   "casMax": 70.5,
-  "weights": { "primary": 1.0, "secondary": 0.75 },
+  "weights": {
+    "primary": 1,
+    "secondary": 0.75
+  },
   "variables": [
-    { "key": "RF",    "band": "total_precipitation_sfc_hourly",  "label": "Rainfall",             "unit": "mm/hr", "tier": "primary",   "order": "asc",  "reducer": "max" },
-    { "key": "CAPE",  "band": "most_unstable_cape_sfc",          "label": "CAPE",                 "unit": "J/kg",  "tier": "primary",   "order": "asc",  "reducer": "max" },
-    { "key": "TCWV",  "band": "total_column_water_vapour_sfc",   "label": "Precipitable Water",   "unit": "mm",    "tier": "primary",   "order": "asc",  "reducer": "max" },
-    { "key": "RH700", "band": "relative_humidity_pl700",         "label": "RH 700 hPa",           "unit": "%",     "tier": "primary",   "order": "asc",  "reducer": "max", "clamp": [0, 100] },
-    { "key": "VV700", "band": "vertical_velocity_pl700",         "label": "Vert. Velocity 700",   "unit": "Pa/s",  "tier": "primary",   "order": "desc", "reducer": "min" },
-    { "key": "ELEV",  "band": "elevation",                       "label": "Elevation",            "unit": "m",     "tier": "primary",   "order": "asc",  "reducer": "max" },
-    { "key": "WS",    "band": "wind_speed_pl850",                "label": "Wind Speed 850 hPa",   "unit": "km/hr", "tier": "primary",   "order": "asc",  "reducer": "max" },
-    { "key": "DP",    "band": "dewpoint_temperature_2m_sfc",     "label": "Dew Point 2m",         "unit": "degC",  "tier": "primary",   "order": "asc",  "reducer": "max" },
-    { "key": "RH500", "band": "relative_humidity_pl500",         "label": "RH 500 hPa",           "unit": "%",     "tier": "secondary", "order": "asc",  "reducer": "max", "clamp": [0, 100] },
-    { "key": "VV500", "band": "vertical_velocity_pl500",         "label": "Vert. Velocity 500",   "unit": "Pa/s",  "tier": "secondary", "order": "desc", "reducer": "min" },
-    { "key": "T2M",   "band": "temperature_2m_sfc",              "label": "Temperature 2m",       "unit": "degC",  "tier": "secondary", "order": "asc",  "reducer": "max" },
-    { "key": "T850",  "band": "temperature_pl850",               "label": "Temperature 850 hPa",  "unit": "degC",  "tier": "secondary", "order": "asc",  "reducer": "max" },
-    { "key": "SLOPE", "band": "slope",                           "label": "Slope",                "unit": "deg",   "tier": "secondary", "order": "asc",  "reducer": "max" }
+    {
+      "key": "RF",
+      "band": "total_precipitation_sfc_hourly",
+      "label": "Rainfall",
+      "unit": "mm/hr",
+      "tier": "primary",
+      "order": "asc",
+      "reducer": "max",
+      "sourceModel": "GRAPES",
+      "sourceBand": "pmd_hourtpe"
+    },
+    {
+      "key": "CAPE",
+      "band": "most_unstable_cape_sfc",
+      "label": "CAPE",
+      "unit": "J/kg",
+      "tier": "primary",
+      "order": "asc",
+      "reducer": "max",
+      "sourceModel": "GRAPES",
+      "sourceBand": "pmd_cape"
+    },
+    {
+      "key": "TCWV",
+      "band": "total_column_water_vapour_sfc",
+      "label": "Precipitable Water",
+      "unit": "mm",
+      "tier": "primary",
+      "order": "asc",
+      "reducer": "max",
+      "sourceModel": "GRAPES",
+      "sourceBand": "pmd_pwat"
+    },
+    {
+      "key": "RH700",
+      "band": "relative_humidity_pl700",
+      "label": "RH 700 hPa",
+      "unit": "%",
+      "tier": "primary",
+      "order": "asc",
+      "reducer": "max",
+      "clamp": [
+        0,
+        100
+      ],
+      "sourceModel": "GRAPES",
+      "sourceBand": "pmd_rhu_700"
+    },
+    {
+      "key": "VV700",
+      "band": "vertical_velocity_pl700",
+      "label": "Vert. Velocity 700",
+      "unit": "Pa/s",
+      "tier": "primary",
+      "order": "desc",
+      "reducer": "min",
+      "sourceModel": "GFS",
+      "sourceBand": "vertical_velocity_pl700"
+    },
+    {
+      "key": "ELEV",
+      "band": "elevation",
+      "label": "Elevation",
+      "unit": "m",
+      "tier": "primary",
+      "order": "asc",
+      "reducer": "max",
+      "sourceModel": null,
+      "sourceBand": "elevation"
+    },
+    {
+      "key": "WS",
+      "band": "wind_speed_pl850",
+      "label": "Wind Speed 850 hPa",
+      "unit": "km/hr",
+      "tier": "primary",
+      "order": "asc",
+      "reducer": "max",
+      "sourceModel": "GFS",
+      "sourceBand": "wind_speed_pl850"
+    },
+    {
+      "key": "DP",
+      "band": "dewpoint_temperature_2m_sfc",
+      "label": "Dew Point 2m",
+      "unit": "degC",
+      "tier": "primary",
+      "order": "asc",
+      "reducer": "max",
+      "sourceModel": "GRAPES",
+      "sourceBand": "pmd_dpt"
+    },
+    {
+      "key": "RH500",
+      "band": "relative_humidity_pl500",
+      "label": "RH 500 hPa",
+      "unit": "%",
+      "tier": "secondary",
+      "order": "asc",
+      "reducer": "max",
+      "clamp": [
+        0,
+        100
+      ],
+      "sourceModel": "GRAPES",
+      "sourceBand": "pmd_rhu_500"
+    },
+    {
+      "key": "VV500",
+      "band": "vertical_velocity_pl500",
+      "label": "Vert. Velocity 500",
+      "unit": "Pa/s",
+      "tier": "secondary",
+      "order": "desc",
+      "reducer": "min",
+      "sourceModel": "GFS",
+      "sourceBand": "vertical_velocity_pl500"
+    },
+    {
+      "key": "T2M",
+      "band": "temperature_2m_sfc",
+      "label": "Temperature 2m",
+      "unit": "degC",
+      "tier": "secondary",
+      "order": "asc",
+      "reducer": "max",
+      "sourceModel": "GRAPES",
+      "sourceBand": "pmd_tem"
+    },
+    {
+      "key": "T850",
+      "band": "temperature_pl850",
+      "label": "Temperature 850 hPa",
+      "unit": "degC",
+      "tier": "secondary",
+      "order": "asc",
+      "reducer": "max",
+      "sourceModel": "GRAPES",
+      "sourceBand": "pmd_tem_850"
+    },
+    {
+      "key": "SLOPE",
+      "band": "slope",
+      "label": "Slope",
+      "unit": "deg",
+      "tier": "secondary",
+      "order": "asc",
+      "reducer": "max",
+      "sourceModel": null,
+      "sourceBand": "slope"
+    }
   ],
   "matrices": {
     "terrain": {
       "label": "Complex Terrain and Foothills",
       "thresholds": {
-        "RF":    [10, 20, 40, 60, 80, 100],
-        "CAPE":  [150, 400, 1000, 1500, 2000, 2500],
-        "TCWV":  [10, 20, 35, 45, 50, 55],
-        "RH700": [60, 70, 80, 90, 95, 98],
-        "VV700": [0, -0.1, -0.3, -0.8, -1.5, -3.0],
-        "ELEV":  [300, 500, 800, 1000, 2000, 3500],
-        "WS":    [10, 20, 30, 40, 50, 70],
-        "DP":    [2, 6, 10, 14, 16, 18],
-        "RH500": [50, 60, 70, 80, 90, 95],
-        "VV500": [0, -0.2, -0.5, -1.0, -2.0, -4.0],
-        "T2M":   [10, 15, 20, 25, 28, 32],
-        "T850":  [0, 5, 10, 15, 20, 24],
-        "SLOPE": [3, 8, 15, 25, 35, 45]
+        "RF": [
+          10,
+          20,
+          40,
+          60,
+          80,
+          100
+        ],
+        "CAPE": [
+          150,
+          400,
+          1000,
+          1500,
+          2000,
+          2500
+        ],
+        "TCWV": [
+          10,
+          20,
+          35,
+          45,
+          50,
+          55
+        ],
+        "RH700": [
+          60,
+          70,
+          80,
+          90,
+          95,
+          98
+        ],
+        "VV700": [
+          0,
+          -0.1,
+          -0.3,
+          -0.8,
+          -1.5,
+          -3
+        ],
+        "ELEV": [
+          300,
+          500,
+          800,
+          1000,
+          2000,
+          3500
+        ],
+        "WS": [
+          10,
+          20,
+          30,
+          40,
+          50,
+          70
+        ],
+        "DP": [
+          2,
+          6,
+          10,
+          14,
+          16,
+          18
+        ],
+        "RH500": [
+          50,
+          60,
+          70,
+          80,
+          90,
+          95
+        ],
+        "VV500": [
+          0,
+          -0.2,
+          -0.5,
+          -1,
+          -2,
+          -4
+        ],
+        "T2M": [
+          10,
+          15,
+          20,
+          25,
+          28,
+          32
+        ],
+        "T850": [
+          0,
+          5,
+          10,
+          15,
+          20,
+          24
+        ],
+        "SLOPE": [
+          3,
+          8,
+          15,
+          25,
+          35,
+          45
+        ]
       }
     },
     "lowlands": {
       "label": "Lowlands and Plains",
       "thresholds": {
-        "RF":    [10, 20, 40, 60, 80, 100],
-        "CAPE":  [250, 500, 1500, 2500, 4000, 5000],
-        "TCWV":  [20, 30, 45, 60, 75, 90],
-        "RH700": [60, 70, 80, 90, 95, 98],
-        "VV700": [0, -0.1, -0.3, -0.8, -1.5, -3.0],
-        "ELEV":  [250, 500, 750, 1000, 1250, 1500],
-        "WS":    [10, 20, 30, 40, 50, 70],
-        "DP":    [8, 12, 16, 20, 24, 28],
-        "RH500": [50, 60, 70, 80, 90, 95],
-        "VV500": [0, -0.2, -0.5, -1.0, -2.0, -4.0],
-        "T2M":   [15, 20, 25, 30, 35, 40],
-        "T850":  [5, 10, 15, 20, 25, 30],
-        "SLOPE": [3, 8, 15, 25, 35, 45]
+        "RF": [
+          10,
+          20,
+          40,
+          60,
+          80,
+          100
+        ],
+        "CAPE": [
+          250,
+          500,
+          1500,
+          2500,
+          4000,
+          5000
+        ],
+        "TCWV": [
+          20,
+          30,
+          45,
+          60,
+          75,
+          90
+        ],
+        "RH700": [
+          60,
+          70,
+          80,
+          90,
+          95,
+          98
+        ],
+        "VV700": [
+          0,
+          -0.1,
+          -0.3,
+          -0.8,
+          -1.5,
+          -3
+        ],
+        "ELEV": [
+          250,
+          500,
+          750,
+          1000,
+          1250,
+          1500
+        ],
+        "WS": [
+          10,
+          20,
+          30,
+          40,
+          50,
+          70
+        ],
+        "DP": [
+          8,
+          12,
+          16,
+          20,
+          24,
+          28
+        ],
+        "RH500": [
+          50,
+          60,
+          70,
+          80,
+          90,
+          95
+        ],
+        "VV500": [
+          0,
+          -0.2,
+          -0.5,
+          -1,
+          -2,
+          -4
+        ],
+        "T2M": [
+          15,
+          20,
+          25,
+          30,
+          35,
+          40
+        ],
+        "T850": [
+          5,
+          10,
+          15,
+          20,
+          25,
+          30
+        ],
+        "SLOPE": [
+          3,
+          8,
+          15,
+          25,
+          35,
+          45
+        ]
       }
     }
   },
@@ -61,9 +384,30 @@
     "scalarPath": {
       "$comment": "Used by every district level score: CARI scalar, hotspot counts, susceptibility, alerts.",
       "steps": [
-        { "op": "reduceResolution", "from": "native", "toScaleMeters": 5000, "reducer": "max", "crs": "EPSG:4326" },
-        { "op": "slope", "source": "dem@5000", "produces": "slope@5000", "$note": "slope is derived HERE, on the 5 km grid" },
-        { "op": "reduceResolution", "from": 5000, "toScaleMeters": 28000, "reducer": "max", "crs": "EPSG:4326", "appliesTo": ["dem", "slope"] }
+        {
+          "op": "reduceResolution",
+          "from": "native",
+          "toScaleMeters": 5000,
+          "reducer": "max",
+          "crs": "EPSG:4326"
+        },
+        {
+          "op": "slope",
+          "source": "dem@5000",
+          "produces": "slope@5000",
+          "$note": "slope is derived HERE, on the 5 km grid"
+        },
+        {
+          "op": "reduceResolution",
+          "from": 5000,
+          "toScaleMeters": 28000,
+          "reducer": "max",
+          "crs": "EPSG:4326",
+          "appliesTo": [
+            "dem",
+            "slope"
+          ]
+        }
       ],
       "reduceRegionScaleMeters": 28000
     },
@@ -82,31 +426,97 @@
   "matrixSelection": {
     "$comment": "Business rule, not data. Province names are compared after lowercasing and stripping non-letters. Districts loaded through scripts/ingest/ingest_admin.py already carry the canonical province name, so the short forms here are a second line of defence for any caller passing a raw source string. Missing one is silent: the district scores against the lowlands matrix and simply comes out lower. The district layer spells the disputed territory IOJK and the tehsil layer says FEDERAL CAPITAL TERRITORY, and neither was in this list.",
     "terrainProvinces": [
-      "azadkashmir", "ajk", "azadjammukashmir",
-      "federalcapital", "federalcapitalterritory", "islamabad", "islamabadcapitalterritory",
-      "gilgitbaltistan", "gb",
-      "indianillegallyoccupiedjammukashmir", "iiojk", "iojk",
-      "jammuandkashmir", "jammukashmir",
-      "khyberpakhtunkhwa", "kpk", "kp", "nwfp"
+      "azadkashmir",
+      "ajk",
+      "azadjammukashmir",
+      "federalcapital",
+      "federalcapitalterritory",
+      "islamabad",
+      "islamabadcapitalterritory",
+      "gilgitbaltistan",
+      "gb",
+      "indianillegallyoccupiedjammukashmir",
+      "iiojk",
+      "iojk",
+      "jammuandkashmir",
+      "jammukashmir",
+      "khyberpakhtunkhwa",
+      "kpk",
+      "kp",
+      "nwfp"
     ],
-    "punjabTerrainDistricts": ["Rawalpindi", "Jhelum", "Attock", "Chakwal", "Murree"],
+    "punjabTerrainDistricts": [
+      "Rawalpindi",
+      "Jhelum",
+      "Attock",
+      "Chakwal",
+      "Murree"
+    ],
     "default": "lowlands"
   },
   "classes": [
-    { "idx": 0, "name": "Very Low",        "max": 15,  "color": "#2c7bb6", "textColor": "#2c7bb6" },
-    { "idx": 1, "name": "Low",             "max": 30,  "color": "#abd9e9", "textColor": "#2f8fbf" },
-    { "idx": 2, "name": "Moderate",        "max": 45,  "color": "#ffffbf", "textColor": "#b8860b" },
-    { "idx": 3, "name": "Moderately High", "max": 60,  "color": "#fdae61", "textColor": "#d9822b" },
-    { "idx": 4, "name": "High",            "max": 75,  "color": "#f46d43", "textColor": "#e0492a" },
-    { "idx": 5, "name": "Very High",       "max": 90,  "color": "#d7191c", "textColor": "#d7191c" },
-    { "idx": 6, "name": "Extreme",         "max": 100, "color": "#7f0000", "textColor": "#7f0000" }
+    {
+      "idx": 0,
+      "name": "Very Low",
+      "max": 15,
+      "color": "#2c7bb6",
+      "textColor": "#2c7bb6"
+    },
+    {
+      "idx": 1,
+      "name": "Low",
+      "max": 30,
+      "color": "#abd9e9",
+      "textColor": "#2f8fbf"
+    },
+    {
+      "idx": 2,
+      "name": "Moderate",
+      "max": 45,
+      "color": "#ffffbf",
+      "textColor": "#b8860b"
+    },
+    {
+      "idx": 3,
+      "name": "Moderately High",
+      "max": 60,
+      "color": "#fdae61",
+      "textColor": "#d9822b"
+    },
+    {
+      "idx": 4,
+      "name": "High",
+      "max": 75,
+      "color": "#f46d43",
+      "textColor": "#e0492a"
+    },
+    {
+      "idx": 5,
+      "name": "Very High",
+      "max": 90,
+      "color": "#d7191c",
+      "textColor": "#d7191c"
+    },
+    {
+      "idx": 6,
+      "name": "Extreme",
+      "max": 100,
+      "color": "#7f0000",
+      "textColor": "#7f0000"
+    }
   ],
   "primaryExtremeOverride": {
     "$comment": "Counts primary variables grading at or above gradeAtLeast. Raises the class floor only, never lowers it.",
     "gradeAtLeast": 5,
     "rules": [
-      { "countAtLeast": 6, "floorClassIdx": 5 },
-      { "countAtLeast": 5, "floorClassIdx": 4 }
+      {
+        "countAtLeast": 6,
+        "floorClassIdx": 5
+      },
+      {
+        "countAtLeast": 5,
+        "floorClassIdx": 4
+      }
     ]
   },
   "alerts": {
@@ -114,5 +524,6 @@
     "minClassIdx": 4,
     "targetLocalHour": 12,
     "timezoneOffsetHours": 5
-  }
+  },
+  "$scoreSourceNote": "sourceModel/sourceBand say where each variable is actually read from in wx.raster_catalog. band stays the canonical key for display range and reference. PMD GRAPES carries the surface and RH/TEM pressure inputs; wind_speed and vertical_velocity come from NOAA GFS; elevation and slope are static (sourceModel null). Each variable resolves against its own model latest cycle at the requested lead, so cross-source inputs align by lead when both feeds are current."
 }

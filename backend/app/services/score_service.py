@@ -45,20 +45,23 @@ class _Job:
 
 
 async def _resolve(forecast_hours: int) -> tuple[timeutil.ResolvedCycle, str]:
-    """Resolve the scoring cycle and the model it belongs to.
+    """Resolve the headline scoring cycle and its model.
 
-    The model is returned alongside because the raster catalogue is now keyed on
-    it: the same band exists under several models, so a path lookup that omits the
-    model is ambiguous. Scoring uses the newest cycle across all models.
+    The headline model is the one most CARI inputs come from (the PMD model with
+    the full surface and pressure set); its cycle drives the response, the score
+    cache key and the lead snapping. Inputs sourced from other models (wind and
+    vertical velocity from GFS) are resolved per variable in _raster_paths against
+    the same lead, so a common lead lines the sources up when both feeds are
+    current. The lead is what matters here, not this model's own cycle time.
     """
-    cycle = await repositories.latest_cycle()
+    model = cari_model.primary_source_model() or "GRAPES"
+    cycle = await repositories.latest_cycle(model)
     if cycle is None:
         raise NotConfigured(
             "wx.cycles",
-            "forecast scoring, no cycle has been ingested yet",
+            f"forecast scoring, no cycle has been ingested for the {model} model",
         )
 
-    model = cycle["model"]
     cycles = [c["creation_time"] for c in await repositories.available_cycles(model)]
     return (
         timeutil.resolve_cycle(
@@ -71,31 +74,47 @@ async def _resolve(forecast_hours: int) -> tuple[timeutil.ResolvedCycle, str]:
     )
 
 
-async def _raster_paths(
-    variables: list[dict],
-    model: str,
-    creation_time: datetime,
-    lead_hours: int,
-) -> dict[str, str]:
-    """Map variable key to a COG path.
+async def _raster_paths(variables: list[dict], lead_hours: int) -> dict[str, str]:
+    """Map each variable to a COG path, reading it from its own source.
 
-    A missing raster is an error, not a None. Scoring against a partial input
-    set produces a number that looks fine and is wrong.
+    A CARI run draws from several models: the humidity, temperature, CAPE, dew
+    point and precipitation from a PMD model, wind and vertical velocity from GFS,
+    elevation and slope from static terrain. Each variable names its sourceModel
+    and sourceBand in the contract, and is resolved against that model's own
+    latest cycle at the shared lead. A missing raster is an error, not a None:
+    scoring against a partial input set produces a number that looks fine and is
+    wrong.
     """
     paths: dict[str, str] = {}
     missing: list[str] = []
+    cycle_cache: dict[str, dict | None] = {}
 
     for spec in variables:
-        path = await repositories.raster_path(spec["band"], model, creation_time, lead_hours)
+        model = spec.get("sourceModel")
+        band = spec.get("sourceBand") or spec["band"]
+
+        creation_time = None
+        lead = None
+        if model:  # a forecast input; static terrain leaves both None
+            if model not in cycle_cache:
+                cycle_cache[model] = await repositories.latest_cycle(model)
+            cyc = cycle_cache[model]
+            if cyc is None:
+                missing.append(f"{spec['key']} (no {model} cycle)")
+                continue
+            creation_time = cyc["creation_time"]
+            lead = lead_hours
+
+        path = await repositories.raster_path(band, model, creation_time, lead)
         if path is None:
-            missing.append(spec["band"])
+            missing.append(f"{spec['key']} ({band}@{model or 'static'})")
         else:
             paths[spec["key"]] = path
 
     if missing:
         raise NotConfigured(
             "wx.raster_catalog",
-            f"scoring, these bands are not catalogued for this cycle and lead: {sorted(missing)}",
+            f"scoring, these inputs are not catalogued for this lead: {sorted(missing)}",
         )
 
     return paths
@@ -106,7 +125,7 @@ async def cari_for_district(
     forecast_hours: int,
     matrix: str | None,
 ) -> dict[str, Any]:
-    cycle, model = await _resolve(forecast_hours)
+    cycle, _model = await _resolve(forecast_hours)
     info = await repositories.district_geometry(district)
     chosen = matrix or cari_model.terrain_class(info["province"], district)
 
@@ -118,7 +137,7 @@ async def cari_for_district(
         return _envelope(cycle, district, chosen, cached, from_cache=True)
 
     specs = cari_model.variable_specs()
-    paths = await _raster_paths(specs, model, cycle.creation_time, cycle.lead_hours)
+    paths = await _raster_paths(specs, cycle.lead_hours)
 
     reducers = cari_model.reducers()
     clamps = {s["key"]: tuple(s["clamp"]) for s in specs if "clamp" in s}

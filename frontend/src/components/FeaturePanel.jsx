@@ -6,8 +6,14 @@
 
 import { TbInfoCircle, TbX, TbMapPin } from 'react-icons/tb'
 
+import DistrictPanel from '@/features/district/DistrictPanel'
+
 import { Panel, IconButton, Chip } from './ui/Panel'
 import { LayerSwatch } from './LayerLegend'
+
+// The district layers are the unit every model scores, so a click on one shows
+// its CARI risk beneath the attributes. Other layers just show attributes.
+const DISTRICT_LAYERS = new Set(['pak_districts', 'iiojk_districts'])
 
 // Presentation only. Values themselves are never rounded before display
 // anywhere they might be used for a calculation.
@@ -54,12 +60,13 @@ function formatValue (key, value) {
   return String(value)
 }
 
-export default function FeaturePanel ({ selection, onClose }) {
+export default function FeaturePanel ({ selection, onClose, leadHours }) {
   if (!selection?.layer) return null
 
   const { layer, properties } = selection
   const fields = (layer.properties ?? []).filter((k) => k !== layer.labelField)
   const title = properties?.[layer.labelField] ?? layer.label
+  const districtName = DISTRICT_LAYERS.has(layer.id) ? properties?.district_name : null
 
   return (
     <Panel
@@ -115,6 +122,18 @@ export default function FeaturePanel ({ selection, onClose }) {
         <Chip color={layer.color}>{layer.label}</Chip>
         {properties?.province_code && <Chip>{properties.province_code}</Chip>}
       </div>
+
+      {/* CARI risk, for a district. The panel scores the clicked district at the
+          current lead and reads "not scored yet" until the forecast inputs are
+          ingested, so it never looks broken while data is still landing. */}
+      {districtName && (
+        <div className="mt-3 border-t border-border pt-2">
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+            Cloudburst risk (CARI)
+          </p>
+          <DistrictPanel district={districtName} leadHours={leadHours} />
+        </div>
+      )}
     </Panel>
   )
 }

@@ -379,7 +379,7 @@ export default function App () {
             )}
 
             <div className="flex items-start gap-3">
-              {selection && <FeaturePanel selection={selection} onClose={() => setSelection(null)} />}
+              {selection && <FeaturePanel selection={selection} onClose={() => setSelection(null)} leadHours={activeLead} />}
               {rasterSelection && <RasterPanel selection={rasterSelection} onClose={() => setRasterSelection(null)} />}
               <MapControls
                 map={map}

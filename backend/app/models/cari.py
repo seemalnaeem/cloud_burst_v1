@@ -173,3 +173,16 @@ def reducers() -> dict[str, str]:
     """Variable key to reducer name. Pass these to zonal statistics, do not
     default them."""
     return {v["key"]: v["reducer"] for v in _C["variables"]}
+
+
+def primary_source_model() -> str | None:
+    """The model most CARI variables are read from, the headline forecast cycle.
+
+    Derived from the source map rather than hardcoded: it is the PMD model that
+    carries the full surface and pressure input set. Wind and vertical velocity
+    come from GFS and elevation and slope are static, so those are the minority.
+    """
+    from collections import Counter
+
+    models = [v.get("sourceModel") for v in _C["variables"] if v.get("sourceModel")]
+    return Counter(models).most_common(1)[0][0] if models else None

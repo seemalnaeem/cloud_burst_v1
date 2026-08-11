@@ -204,6 +204,7 @@
     },
     {
       "$pmdComment": "PMD forecast bands. These are temporal: catalogued per cycle and per lead, so a tile request carries creation_time and lead. They come from the PMD portal, the one authenticated source, and are all surface level. The pressure level bands above (relative_humidity_pl700, vertical_velocity_pl500, and the rest) are the CARI inputs and are NOT what these are; PMD does not serve them for this account. min and max are display ranges judged against the measured data, unit matches what the PMD legend declares.",
+      "$scaleComment": "The portal serves every Int16 field as tenths of the physical unit: temperature and dew point in tenths of a degree, humidity in tenths of a percent, precipitation and precipitable water in tenths of a millimetre. sourceScale is the factor the ingest multiplies the raw pixels by to reach the unit declared here, so the stored COG, the legend, the identify tool and the CARI inputs all read physical units. CAPE is the one exception, served as Float32 already in J/kg, so it carries no sourceScale.",
       "key": "pmd_cape",
       "label": "CAPE",
       "unit": "J/kg",
@@ -215,6 +216,7 @@
     },
     {
       "key": "pmd_pwat",
+      "sourceScale": 0.1,
       "label": "Precipitable Water",
       "unit": "kg/m2",
       "category": "moisture",
@@ -225,6 +227,7 @@
     },
     {
       "key": "pmd_dpt",
+      "sourceScale": 0.1,
       "label": "Dew Point",
       "unit": "C",
       "category": "moisture",
@@ -235,6 +238,7 @@
     },
     {
       "key": "pmd_rhu",
+      "sourceScale": 0.1,
       "label": "Relative Humidity",
       "unit": "%",
       "category": "moisture",
@@ -245,6 +249,7 @@
     },
     {
       "key": "pmd_tem",
+      "sourceScale": 0.1,
       "label": "Temperature",
       "unit": "C",
       "category": "instability",
@@ -255,6 +260,7 @@
     },
     {
       "key": "pmd_tpe",
+      "sourceScale": 0.1,
       "label": "Total Precipitation",
       "unit": "mm",
       "category": "rainfall",
@@ -266,6 +272,7 @@
     {
       "$pmdLevelComment": "Second wave of PMD bands, added once the model endpoint was found to serve pressure levels. HOURTPE is precipitation over the single step, not cumulative, so it needs no differencing. The _pl700, _pl500 and _pl850 bands are the pressure level fields the CARI model actually wants: PMD serves RH at 700 and 500 and temperature at 850 through the level parameter, which the surface-only feed did not. Vertical velocity and wind at level are still absent, so CARI is closer but not complete.",
       "key": "pmd_hourtpe",
+      "sourceScale": 0.1,
       "label": "Hourly Precipitation",
       "unit": "mm",
       "category": "rainfall",
@@ -276,6 +283,7 @@
     },
     {
       "key": "pmd_rhu_700",
+      "sourceScale": 0.1,
       "label": "Relative Humidity 700 hPa",
       "unit": "%",
       "category": "moisture",
@@ -286,6 +294,7 @@
     },
     {
       "key": "pmd_rhu_500",
+      "sourceScale": 0.1,
       "label": "Relative Humidity 500 hPa",
       "unit": "%",
       "category": "moisture",
@@ -296,6 +305,7 @@
     },
     {
       "key": "pmd_tem_850",
+      "sourceScale": 0.1,
       "label": "Temperature 850 hPa",
       "unit": "C",
       "category": "instability",

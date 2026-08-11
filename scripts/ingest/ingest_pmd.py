@@ -71,6 +71,37 @@ def is_float_raster(path: Path) -> bool:
     return dt in (gdal.GDT_Float32, gdal.GDT_Float64)
 
 
+def scale_raster(src: Path, dst: Path, factor: float, nodata: float = -9999.0) -> None:
+    """Multiply every valid pixel by factor, writing Float32.
+
+    The portal serves its Int16 fields as tenths of the physical unit, so a raw
+    temperature of 448 is 44.8 C and a raw humidity of 1000 is 100 percent. The
+    band's sourceScale in bands.json is that factor; applying it here means the
+    stored COG, the legend, the identify tool and the CARI inputs all read the
+    unit the contract declares rather than ten times it. Nodata pixels are left
+    at the nodata sentinel, never scaled, so the boundary clip keeps a clean edge.
+    """
+    ds = gdal.Open(str(src))
+    band = ds.GetRasterBand(1)
+    arr = band.ReadAsArray().astype("float32")
+    nd = band.GetNoDataValue()
+    mask = (arr == nd) if nd is not None else None
+    arr = arr * factor
+    if mask is not None:
+        arr[mask] = nodata
+
+    driver = gdal.GetDriverByName("GTiff")
+    out = driver.Create(str(dst), ds.RasterXSize, ds.RasterYSize, 1, gdal.GDT_Float32)
+    out.SetGeoTransform(ds.GetGeoTransform())
+    out.SetProjection(ds.GetProjection())
+    out_band = out.GetRasterBand(1)
+    out_band.WriteArray(arr)
+    out_band.SetNoDataValue(nodata)
+    out_band.FlushCache()
+    out = None
+    ds = None
+
+
 def build_plan() -> dict[str, dict]:
     """Group the contract's PMD raster layers by model.
 
@@ -266,12 +297,24 @@ def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | Non
                     raw.unlink(missing_ok=True)
                     log(f"  {element} {level} lead {lead}: degenerate source {sw}x{sh}, skipping")
                     continue
+                # Bring the raw pixels into the unit the contract declares. Every
+                # Int16 PMD field is tenths of its physical unit; CAPE is served
+                # as Float32 already and carries no sourceScale, so it passes
+                # through untouched. Scaling before the clip keeps one Float32
+                # path into the COG for the fields that need it.
+                scale = float(spec.get("sourceScale", 1.0))
+                source = raw
+                if scale != 1.0:
+                    scaled = settings.tmp_dir / f"pmd_scaled_{dt}_{band_key}_{lead}.tif"
+                    scale_raster(raw, scaled, scale)
+                    raw.unlink(missing_ok=True)
+                    source = scaled
                 # Clip the Asia-wide field to the national boundary, so the
                 # temporal layers share the terrain layers' clean edge and carry
                 # far fewer pixels than the raw continental tile.
-                clip_to_boundary(raw, clipped, CUTLINE, -9999)
+                clip_to_boundary(source, clipped, CUTLINE, -9999)
                 to_cog(clipped, target, tmp_dir=settings.tmp_dir, float_data=is_float_raster(clipped))
-                raw.unlink(missing_ok=True)
+                source.unlink(missing_ok=True)
                 clipped.unlink(missing_ok=True)
 
                 if not validate_cog(target):

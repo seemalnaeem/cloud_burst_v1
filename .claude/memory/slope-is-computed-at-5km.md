@@ -36,6 +36,19 @@ gdalwarp -tr 0.2513 0.2513 -r max slope_5km.tif slope_28km.tif   # and the DEM l
 The per-pixel CARI raster deliberately uses **native** terrain: reducing it to 28 km made a district
 render as one flat colour. Keep the paths distinct.
 
+**Measured on the delivered DEM**, 2026-08-10, which settles how large the effect is:
+
+| Grid | max slope | mean slope |
+|---|---|---|
+| native, 30 m | 83.6 deg | 10.6 deg |
+| 5 km, derived from the 5 km DEM | 16.4 deg | 1.3 deg |
+
+The threshold both boolean models test is 15 degrees. Against the native grid almost every mountain
+district clears it; against the 5 km grid almost none do. This is not a rounding difference.
+
+Both grids exist now, built by `scripts/ingest/ingest_terrain.py`: bands `slope` (native, display and
+per pixel CARI) and `slope_5km` (scoring). Reading the wrong band is the whole failure mode.
+
 **Open question for the owner:** reproduce faithfully, or move to native-resolution slope? Native is
 arguably better science for cloudburst risk, where a steep catchment wall matters more than a
 regional gradient, but it shifts every historical score. Both paths are in `cari.json`

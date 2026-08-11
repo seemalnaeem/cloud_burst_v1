@@ -23,6 +23,7 @@ router = APIRouter()
 async def resolve(
     layer: str = Query(..., description="Raster layer id from layers.json"),
     band: str | None = Query(None, description="Band key, required for the forecast layer"),
+    model: str | None = Query(None, description="PMD data_type, required for a forecast layer"),
     creation_time: datetime | None = Query(None),
     lead: int | None = Query(None, ge=-168, le=360),
 ) -> dict:
@@ -33,13 +34,24 @@ async def resolve(
     definition = raster_layers[layer]
 
     # The forecast layer is driven by whichever band the user selected. The
-    # others map to a fixed band key.
+    # others carry their band key in the contract.
+    #
+    # The layer id is not the band key and must not be assumed to be. The
+    # elevation layer is `dem` on the map and `elevation` in the band catalogue,
+    # and falling back to the layer id sent this looking for a band named `dem`,
+    # which does not exist: the DEM returned a validation error instead of a
+    # tile, from a layer that was otherwise entirely correct.
     if definition.get("bandDriven"):
         if not band:
             raise ValidationFailed(f"Layer {layer!r} needs a band parameter.")
         band_key = band
     else:
-        band_key = layer
+        band_key = definition.get("band", layer)
+
+    # A forecast layer resolves against a specific model, because the same band
+    # exists under several models. The layer carries its model in the contract, so
+    # the query parameter only needs to be trusted after it agrees with it.
+    resolved_model = model or definition.get("model")
 
     try:
         spec = contracts.band(band_key)
@@ -47,12 +59,16 @@ async def resolve(
         raise ValidationFailed(f"Unknown band {band_key!r}. See /api/meta/bands.") from exc
 
     if creation_time is None and not spec.get("static"):
-        cycle = await repositories.latest_cycle()
+        cycle = await repositories.latest_cycle(resolved_model)
         if cycle is None:
-            raise NotConfigured("wx.cycles", f"the {layer} layer, no forecast cycle is ingested")
+            raise NotConfigured(
+                "wx.cycles",
+                f"the {layer} layer, no forecast cycle is ingested"
+                + (f" for model {resolved_model}" if resolved_model else ""),
+            )
         creation_time = cycle["creation_time"]
 
-    path = await repositories.raster_path(band_key, creation_time, lead)
+    path = await repositories.raster_path(band_key, resolved_model, creation_time, lead)
     if path is None:
         raise NotConfigured(
             "wx.raster_catalog",
@@ -62,6 +78,7 @@ async def resolve(
     return {
         "layer": layer,
         "band": band_key,
+        "model": resolved_model,
         "path": path,
         "creationTime": creation_time,
         "leadHours": lead,
@@ -77,13 +94,20 @@ async def resolve(
 
 @router.get("/catalog")
 async def catalog() -> dict:
-    """What is actually on disk right now.
+    """What is actually available right now.
 
-    Useful when a layer renders empty and you need to know whether the ingest
-    ran at all.
+    Two answers, and the difference between them matters. `files` is what sits
+    in the COG directory. `bands` is what the database will actually resolve, and
+    only the second one can serve a tile: a file nobody catalogued is invisible
+    to every route here.
+
+    The portal reads this to decide which raster layers to offer. A layer whose
+    band is missing is shown but disabled, so an uningested source reads as
+    pending rather than as a broken toggle.
     """
     return {
         "cogDir": str(settings.cog_dir),
         "exists": settings.cog_dir.exists(),
         "files": sorted(p.name for p in settings.cog_dir.glob("*.tif")) if settings.cog_dir.exists() else [],
+        "bands": await repositories.catalogued_bands(),
     }

@@ -61,17 +61,23 @@ async def get_district(name: str) -> dict[str, Any]:
     return dict(row)
 
 
-async def district_geometry(name: str, generalized: bool = True) -> dict[str, Any]:
+async def district_geometry(name: str, tolerance_deg: float | None = None) -> dict[str, Any]:
     """District geometry as GeoJSON, for zonal statistics.
 
-    Generalized by default. Full resolution is only needed when the raster is
-    fine enough for the difference to matter.
+    Full resolution by default. The stored generalized columns are gone: they
+    were built at a fixed 0.05 degrees, which reduced the district layer from
+    6.7 million vertices to 2,899 and made every boundary visibly blocky. Tiles
+    now thin to their own zoom instead, and there is nothing left to read here.
+
+    Pass a tolerance only when the raster is coarse enough that the difference
+    cannot matter. Simplifying a district for a 30 m DEM moves the boundary
+    further than the pixels it is supposed to select.
     """
-    column = "geom_z9" if generalized else "geom"
+    geometry = "geom" if tolerance_deg is None else f"ST_SimplifyPreserveTopology(geom, {float(tolerance_deg)})"
     row = await pool.fetchrow(
         f"""
         SELECT district_name, province,
-               ST_AsGeoJSON(COALESCE({column}, geom))::text AS geometry
+               ST_AsGeoJSON({geometry})::text AS geometry
         FROM geo.districts
         WHERE district_name = $1
         """,
@@ -91,49 +97,150 @@ async def district_extent(name: str) -> dict[str, float] | None:
     return dict(row) if row else None
 
 
-async def latest_cycle() -> dict[str, Any] | None:
+# A fixed allowlist of layer id to source, so the extent query never interpolates
+# anything a caller supplied. This is the "map a dynamic table name through a
+# fixed allowlist" rule from the security guardrail made concrete. A tuple is
+# (table, where). Everything not listed is a raster, and every raster the portal
+# serves is clipped to the national boundary, so its extent is the nation's.
+_LAYER_EXTENT_SOURCE: dict[str, object] = {
+    "pak_national": "geo.national",
+    "pak_provinces": "geo.provinces",
+    "pak_districts": "geo.districts",
+    "pak_tehsils": "geo.tehsils",
+    "iiojk_districts": ("geo.districts", "province_code = 'IJK'"),
+    "historic_events": "obs.events",
+}
+
+
+async def layer_extent(layer_id: str) -> dict[str, float] | None:
+    """Bounding box of a layer's geometry, in EPSG:4326.
+
+    Returns None when the layer has no rows yet, which is a real state for the
+    events layer, so the caller can fall back rather than fly to an empty box.
+    """
+    spec = _LAYER_EXTENT_SOURCE.get(layer_id, "geo.national")
+    table, where = spec if isinstance(spec, tuple) else (spec, None)
+    clause = f" WHERE {where}" if where else ""
+
     row = await pool.fetchrow(
-        """
-        SELECT creation_time, model, published_leads
-        FROM wx.cycles
-        ORDER BY creation_time DESC
-        LIMIT 1
+        f"""
+        SELECT ST_XMin(e) AS west, ST_YMin(e) AS south,
+               ST_XMax(e) AS east, ST_YMax(e) AS north
+        FROM (SELECT ST_Extent(geom) AS e FROM {table}{clause}) s
         """
     )
+    if not row or row["west"] is None:
+        return None
+    return {"west": row["west"], "south": row["south"], "east": row["east"], "north": row["north"]}
+
+
+async def latest_cycle(model: str | None = None) -> dict[str, Any] | None:
+    """The newest cycle, for one model or across all of them.
+
+    A model is passed for a forecast layer, because two models publish a cycle at
+    the same hour and the layer must scrub its own model's run. No model is the
+    fallback for a caller that only wants "is anything ingested".
+    """
+    if model:
+        row = await pool.fetchrow(
+            """
+            SELECT creation_time, model, published_leads
+            FROM wx.cycles
+            WHERE model = $1
+            ORDER BY creation_time DESC
+            LIMIT 1
+            """,
+            model,
+        )
+    else:
+        row = await pool.fetchrow(
+            """
+            SELECT creation_time, model, published_leads
+            FROM wx.cycles
+            ORDER BY creation_time DESC
+            LIMIT 1
+            """
+        )
     return dict(row) if row else None
 
 
-async def available_cycles(limit: int = 40) -> list[dict[str, Any]]:
+async def forecast_models() -> list[dict[str, Any]]:
+    """The latest cycle per model, for the model selector and per-model timeline.
+
+    One row per model, its newest cycle and the leads that cycle published. The
+    panel offers exactly these models and the slider draws exactly these leads.
+    """
+    rows = await pool.fetch(
+        """
+        SELECT DISTINCT ON (model) model, creation_time, published_leads
+        FROM wx.cycles
+        ORDER BY model, creation_time DESC
+        """
+    )
+    return [dict(r) for r in rows]
+
+
+async def available_cycles(model: str, limit: int = 40) -> list[dict[str, Any]]:
     rows = await pool.fetch(
         """
         SELECT creation_time, published_leads
         FROM wx.cycles
+        WHERE model = $1
         ORDER BY creation_time DESC
-        LIMIT $1
+        LIMIT $2
         """,
+        model,
         limit,
     )
     return [dict(r) for r in rows]
 
 
-async def raster_path(band_key: str, creation_time, lead_hours: int | None) -> str | None:
-    """Resolve a band, cycle and lead to a COG path.
+async def raster_path(band_key: str, model: str | None, creation_time, lead_hours: int | None) -> str | None:
+    """Resolve a band, model, cycle and lead to a COG path.
 
-    Callers never pass a filesystem path, they pass a band key. That is what
-    keeps the raster endpoints from becoming an arbitrary file reader.
+    Callers never pass a filesystem path, they pass a band key and a model. That
+    is what keeps the raster endpoints from becoming an arbitrary file reader. A
+    static band ignores the model and cycle; a forecast band needs both, because
+    the same band exists under several models.
     """
     return await pool.fetchval(
         """
         SELECT path FROM wx.raster_catalog
         WHERE band_key = $1
-          AND (is_static OR (creation_time = $2 AND lead_hours = $3))
+          AND (is_static OR (model = $2 AND creation_time = $3 AND lead_hours = $4))
         ORDER BY is_static DESC, created_at DESC
         LIMIT 1
         """,
         band_key,
+        model,
         creation_time,
         lead_hours,
     )
+
+
+async def catalogued_bands() -> list[dict[str, Any]]:
+    """Which bands can currently resolve to a raster, per model, and how many.
+
+    Static bands resolve on their own and carry a NULL model. Cycle driven bands
+    need a cycle as well, so `cycles` being zero is the difference between
+    "ingested" and "ingested for a forecast run that exists". The model is
+    returned because the same band under two models is two different answers, and
+    the panel enables a row only when its own (band, model) pair is present.
+    """
+    rows = await pool.fetch(
+        """
+        SELECT band_key,
+               model,
+               bool_or(is_static)                              AS is_static,
+               count(*)                                        AS entries,
+               count(DISTINCT creation_time)                   AS cycles,
+               max(created_at)                                 AS ingested_at
+        FROM wx.raster_catalog
+        GROUP BY band_key, model
+        ORDER BY band_key, model
+        """
+    )
+    return [dict(r) for r in rows]
 
 
 async def cached_cari(creation_time, lead_hours: int, district: str, matrix: str):

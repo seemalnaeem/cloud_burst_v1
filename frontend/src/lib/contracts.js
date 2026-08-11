@@ -51,6 +51,28 @@ export const bandByKey = (key) => contracts().bands.find((b) => b.key === key)
 export const layerById = (id) => contracts().layers.find((l) => l.id === id)
 export const paletteByName = (name) => contracts().palettes[name]
 
+export const rasterLayerById = (id) => contracts().rasterLayers.find((l) => l.id === id)
+
+/**
+ * The value scale a raster layer's legend draws.
+ *
+ * The colours and the range come from the same two contracts the gateway uses to
+ * build the TiTiler colormap, so the blocks in the legend cover the same
+ * intervals as the colours on the map. Reading them from anywhere else is how a
+ * legend starts describing a map it no longer matches.
+ */
+export const rasterScale = (def) => {
+  const palette = def.palette ? paletteByName(def.palette) : null
+  if (!palette?.colors) return null
+
+  const band = def.band ? bandByKey(def.band) : null
+  const min = def.min ?? band?.min
+  const max = def.max ?? band?.max
+  if (min == null || max == null) return null
+
+  return { kind: 'steps', colors: palette.colors, min, max, unit: band?.unit }
+}
+
 export const cariClasses = () => contracts().cari.classes
 export const susceptibilityClasses = () => contracts().susceptibility.classes
 

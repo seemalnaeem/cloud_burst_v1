@@ -1,4 +1,4 @@
-// MapLibre helpers.
+// Mapbox GL helpers.
 //
 // Layer construction is driven entirely by shared/contracts/layers.json, so
 // adding a layer is a JSON edit rather than a component change. If you find
@@ -132,33 +132,97 @@ export function addVectorLayer (map, def, visible) {
   }
 }
 
-/** Add or replace a raster layer. */
-export function addRasterLayer (map, layerId, options) {
-  const id = `raster-${layerId}`
+export const rasterId = (layerId) => `raster-${layerId}`
+
+/**
+ * The tile template for a raster layer at a moment in time.
+ *
+ * A band is sent only for a band driven layer. A cycle and a lead are sent only
+ * for a temporal layer, and they are what make the same layer show a different
+ * hour when the time slider moves. Everything else about the tile, the display
+ * range, the palette, the resampling, is decided server side from the contract,
+ * so the browser cannot ask for a tile the legend does not describe.
+ */
+export function rasterTemplate (def, { band, creationTime, leadHours } = {}) {
+  return rasterTileUrl(def.id, {
+    band: def.bandDriven ? band : undefined,
+    // A forecast layer carries its model in the contract, so the tile resolves
+    // against the right run without the caller having to thread it.
+    model: def.model,
+    creationTime: def.temporal ? creationTime : undefined,
+    leadHours: def.temporal ? leadHours : undefined
+  })
+}
+
+/**
+ * Add a raster layer, or leave it alone if it is already there.
+ *
+ * Idempotent on purpose. The obvious version removed and re-added the layer on
+ * every call, which threw away the source and with it every tile the browser
+ * had: dragging an opacity slider re-fetched the whole visible extent on each
+ * frame. Opacity is a paint property and belongs in setRasterOpacity; moving
+ * through time belongs in setRasterTime.
+ */
+export function addRasterLayer (map, def, options = {}) {
+  const id = rasterId(def.id)
   const src = `src-${id}`
 
-  removeRasterLayer(map, layerId)
+  if (map.getLayer(id)) {
+    setRasterOpacity(map, def.id, options.opacity ?? def.opacity ?? 0.8)
+    return
+  }
 
-  map.addSource(src, {
-    type: 'raster',
-    tiles: [rasterTileUrl(layerId, options)],
-    tileSize: 256
-  })
+  if (!map.getSource(src)) {
+    map.addSource(src, {
+      type: 'raster',
+      tiles: [rasterTemplate(def, options)],
+      tileSize: 256
+    })
+  }
 
   // Rasters go beneath every vector layer so boundaries stay readable over a
-  // heat map. beforeId is the lowest data layer currently on the map.
+  // heat map. beforeId is the lowest vector data layer currently on the map.
   const first = map.getStyle().layers.find((l) => l.id.endsWith('-fill') || l.id.endsWith('-circle'))
 
   map.addLayer(
-    { id, type: 'raster', source: src, paint: { 'raster-opacity': options?.opacity ?? 0.75 } },
+    {
+      id,
+      type: 'raster',
+      source: src,
+      paint: {
+        'raster-opacity': options.opacity ?? def.opacity ?? 0.8,
+        // Nearest at high zoom, so a 30 m DEM shows its own pixels instead of a
+        // smoothed guess at what is between them.
+        'raster-resampling': 'linear',
+        'raster-fade-duration': 200
+      }
+    },
     first?.id
   )
 }
 
 export function removeRasterLayer (map, layerId) {
-  const id = `raster-${layerId}`
+  const id = rasterId(layerId)
   if (map.getLayer(id)) map.removeLayer(id)
   if (map.getSource(`src-${id}`)) map.removeSource(`src-${id}`)
+}
+
+export function setRasterOpacity (map, layerId, opacity) {
+  const id = rasterId(layerId)
+  if (map.getLayer(id)) map.setPaintProperty(id, 'raster-opacity', opacity)
+}
+
+/**
+ * Point a temporal raster layer at a different cycle or lead.
+ *
+ * setTiles swaps the URL template on the live source, so Mapbox refetches the
+ * visible tiles for the new hour and keeps the layer, its position and its
+ * opacity. Removing and re-adding the layer would flash and lose the stack
+ * order; this just changes what the same layer is showing.
+ */
+export function setRasterTime (map, def, { creationTime, leadHours } = {}) {
+  const src = map.getSource(`src-${rasterId(def.id)}`)
+  if (src?.setTiles) src.setTiles([rasterTemplate(def, { creationTime, leadHours })])
 }
 
 export function setLayerVisible (map, def, visible) {

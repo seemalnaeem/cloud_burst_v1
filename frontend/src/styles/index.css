@@ -154,27 +154,18 @@ textarea {
   }
 }
 
-/* Mapbox GL's own chrome. The navigation control is replaced by our themed
-   MapControls, but attribution and scale are still Mapbox's and ship with
-   light styling baked in, so they need bringing into the theme. */
+/* Mapbox GL's own chrome, all of it suppressed. Navigation is replaced by our
+   themed MapControls, and the scale bar, the attribution control and the
+   wordmark are off at the project owner's request.
+
+   The wordmark needs CSS rather than a constructor option: Mapbox GL re-adds it
+   whenever the style loads, so removing the control in JS would only last until
+   the next basemap switch. */
 .mapboxgl-ctrl-attrib,
+.mapboxgl-ctrl-attrib-button,
+.mapboxgl-ctrl-logo,
 .mapboxgl-ctrl-scale {
-  background: var(--cb-panel) !important;
-  color: var(--cb-text-2) !important;
-  border: 1px solid var(--cb-border) !important;
-  border-radius: 6px !important;
-  font-family: var(--cb-font) !important;
-  font-size: 10.5px !important;
-}
-.mapboxgl-ctrl-attrib a {
-  color: var(--cb-text-2) !important;
-}
-.mapboxgl-ctrl-scale {
-  border-top-width: 2px !important;
-}
-:root[data-theme='dark'] .mapboxgl-ctrl-attrib-button {
-  /* The stock icon is a dark glyph, invisible on the dark panel. */
-  filter: invert(1) !important;
+  display: none !important;
 }
 
 .mapboxgl-canvas-container canvas {

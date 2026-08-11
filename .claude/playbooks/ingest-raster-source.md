@@ -24,10 +24,11 @@ downstream is off by a thousand. An extent past 180 E is the GRIB 0-360 conventi
 | Temperature | GFS is **Kelvin**, subtract 273.15 |
 | Precip type | 4 GFS flags to one code (0/1/3/5/8), frozen wins over rain |
 
-**5. Terrain, once.** Order matters: resample the DEM to 5 km **first**, derive slope from that, then
-reduce both to 28 km with a max reducer. Deriving slope at native resolution inflates every mountain
-district and both boolean models test slope at 15 degrees. Exact commands in
-[[slope-is-computed-at-5km]]. `gdaldem slope` needs `-s 111120`.
+**5. Terrain, once.** `ingest_terrain.py --file /data/raster/pakistan_dem.tif` builds all four
+products and catalogues them; it is idempotent and `--force` rebuilds. Order matters inside it:
+resample the DEM to 5 km **first**, derive slope from that, then reduce to 28 km with a max reducer.
+Deriving slope at native resolution inflates every mountain district and both boolean models test
+slope at 15 degrees. Reasoning in [[slope-is-computed-at-5km]]. `gdaldem slope` needs `-s 111120`.
 
 **6. Validate, then publish.** `rio cogeo validate /data/tmp/out.tif` and only then move into
 `/data/cog`. TiTiler serves a half-written file and it looks like corruption with no error anywhere.

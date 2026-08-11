@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
-import sys
 import time
+
+from _pg import pg_env, psql, run
 
 DATA_DIR = os.environ.get("ADMIN_DIR", "/data/vector/admin_final")
 PROMOTE_SQL = "/app/db_ingest/promote_admin.sql"
@@ -72,35 +72,6 @@ DROPPED = {
     "Area_Sq_Km": "area in an unstated projection",
     "area_sq_km": "area in an unstated projection",
 }
-
-
-def pg_env() -> dict:
-    """Connection settings for ogr2ogr and psql, from DATABASE_URL."""
-    url = os.environ["DATABASE_URL"].replace("postgresql://", "")
-    creds, hostpart = url.split("@", 1)
-    user, password = creds.split(":", 1)
-    hostport, dbname = hostpart.split("/", 1)
-    host, port = hostport.split(":", 1)
-    return {
-        "PGHOST": host, "PGPORT": port, "PGDATABASE": dbname,
-        "PGUSER": user, "PGPASSWORD": password,
-    }
-
-
-def run(cmd: list[str], env: dict) -> str:
-    merged = {**os.environ, **env}
-    proc = subprocess.run(cmd, env=merged, capture_output=True, text=True)
-    if proc.returncode != 0:
-        sys.stderr.write(proc.stdout + "\n" + proc.stderr + "\n")
-        raise SystemExit(f"Command failed: {' '.join(cmd[:3])}...")
-    return proc.stdout
-
-
-def psql(sql: str, env: dict, quiet: bool = True) -> str:
-    args = ["psql", "-v", "ON_ERROR_STOP=1", "-c", sql]
-    if quiet:
-        args[1:1] = ["-tA"]
-    return run(args, env)
 
 
 def stage(layer: dict, env: dict, dry_run: bool) -> None:

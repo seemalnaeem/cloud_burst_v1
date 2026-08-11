@@ -22,7 +22,19 @@ shapely==2.0.6
 pyproj==3.7.0
 geopandas==1.0.1
 fiona==1.10.1
-numpy==2.2.1
+# numpy 1.x, and this is not a stale pin.
+#
+# The base image is GDAL 3.8.4 on Ubuntu 22.04, whose osgeo bindings are compiled
+# against numpy 1.x. Installing numpy 2 over them breaks osgeo.gdal_array with
+# "_ARRAY_API not found", and the damage is not limited to array access:
+# gdal.UseExceptions() imports gdal_array, so it throws and never takes effect.
+# GDAL then goes back to returning None on failure, which is exactly the silent
+# mode app/geo/gdal_tools.py exists to prevent. The symptom is an ingest that
+# reports success having written nothing.
+#
+# 1.26.4 is the last 1.x release and satisfies rasterio 1.4.3, which wants >=1.24.
+# Move to numpy 2 only alongside a base image whose bindings were built for it.
+numpy==1.26.4
 pandas==2.2.3
 
 # Logging

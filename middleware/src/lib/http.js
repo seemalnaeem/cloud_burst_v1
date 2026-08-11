@@ -58,9 +58,20 @@ export async function getJson (url, options = {}) {
   return res.body.json()
 }
 
+/**
+ * Stream an upstream response through.
+ *
+ * `allowStatus` lets a caller treat a specific upstream status as a normal
+ * answer rather than a failure, and get the response back to deal with itself.
+ * A tile server answering 404 for a tile outside its raster is the case this
+ * exists for: that is a fact about geography, not an error, and turning it into
+ * a 502 fills the console with failures on every pan.
+ */
 export async function stream (url, options = {}) {
   const res = await call(url, options)
-  if (res.statusCode >= 400) {
+  const allowed = options.allowStatus ?? []
+
+  if (res.statusCode >= 400 && !allowed.includes(res.statusCode)) {
     await res.body.dump()
     throw new AppError('UPSTREAM_ERROR', `Upstream returned ${res.statusCode}.`, { url })
   }

@@ -166,8 +166,143 @@
       "derivedFrom": {
         "op": "gdaldem_slope",
         "source": "elevation",
-        "$comment": "gdaldem slope -compute_edges -s 111120, the scale factor is required for a geographic DEM"
+        "$comment": "gdaldem slope -compute_edges -s 111120, the scale factor is required for a geographic DEM. This native grid is for display and for the per pixel CARI raster. Scoring uses slope_5km, which is a different number."
       }
+    },
+    {
+      "key": "elevation_5km",
+      "label": "Elevation, 5 km",
+      "unit": "m",
+      "category": "orographic",
+      "static": true,
+      "internal": true,
+      "min": 0, "max": 5000,
+      "palette": "elevation",
+      "legendTitle": "Elevation (m)",
+      "$comment": "Scoring input, not a map layer. Reduced from the native DEM with a max reducer so a district's highest cell drives its terrain conditions, which is what the legacy models do.",
+      "derivedFrom": {
+        "op": "gdalwarp_max",
+        "source": "elevation",
+        "resolutionDeg": 0.0449
+      }
+    },
+    {
+      "key": "slope_5km",
+      "label": "Slope, 5 km",
+      "unit": "deg",
+      "category": "orographic",
+      "static": true,
+      "internal": true,
+      "min": 0, "max": 45,
+      "palette": "slope",
+      "legendTitle": "Slope (deg)",
+      "$comment": "Scoring input, not a map layer. Derived FROM elevation_5km, never from the native DEM. Slope over a 5 km run is far gentler than over 30 m, and both boolean models test slope at 15 degrees, so deriving it natively would fire the slope condition across every mountain district. See .claude/memory/slope-is-computed-at-5km.md.",
+      "derivedFrom": {
+        "op": "gdaldem_slope",
+        "source": "elevation_5km"
+      }
+    },
+    {
+      "$pmdComment": "PMD forecast bands. These are temporal: catalogued per cycle and per lead, so a tile request carries creation_time and lead. They come from the PMD portal, the one authenticated source, and are all surface level. The pressure level bands above (relative_humidity_pl700, vertical_velocity_pl500, and the rest) are the CARI inputs and are NOT what these are; PMD does not serve them for this account. min and max are display ranges judged against the measured data, unit matches what the PMD legend declares.",
+      "key": "pmd_cape",
+      "label": "CAPE",
+      "unit": "J/kg",
+      "category": "instability",
+      "temporal": true,
+      "min": 0, "max": 4000,
+      "palette": "plasma",
+      "legendTitle": "CAPE (J/kg)"
+    },
+    {
+      "key": "pmd_pwat",
+      "label": "Precipitable Water",
+      "unit": "kg/m2",
+      "category": "moisture",
+      "temporal": true,
+      "min": 0, "max": 70,
+      "palette": "viridis",
+      "legendTitle": "Precipitable Water (kg/m2)"
+    },
+    {
+      "key": "pmd_dpt",
+      "label": "Dew Point",
+      "unit": "C",
+      "category": "moisture",
+      "temporal": true,
+      "min": -10, "max": 30,
+      "palette": "continuous",
+      "legendTitle": "Dew Point (C)"
+    },
+    {
+      "key": "pmd_rhu",
+      "label": "Relative Humidity",
+      "unit": "%",
+      "category": "moisture",
+      "temporal": true,
+      "min": 0, "max": 100,
+      "palette": "continuous",
+      "legendTitle": "Relative Humidity (%)"
+    },
+    {
+      "key": "pmd_tem",
+      "label": "Temperature",
+      "unit": "C",
+      "category": "instability",
+      "temporal": true,
+      "min": -10, "max": 45,
+      "palette": "plasma",
+      "legendTitle": "Temperature (C)"
+    },
+    {
+      "key": "pmd_tpe",
+      "label": "Total Precipitation",
+      "unit": "mm",
+      "category": "rainfall",
+      "temporal": true,
+      "min": 0, "max": 100,
+      "palette": "rainfall",
+      "legendTitle": "Total Precipitation (mm)"
+    },
+    {
+      "$pmdLevelComment": "Second wave of PMD bands, added once the model endpoint was found to serve pressure levels. HOURTPE is precipitation over the single step, not cumulative, so it needs no differencing. The _pl700, _pl500 and _pl850 bands are the pressure level fields the CARI model actually wants: PMD serves RH at 700 and 500 and temperature at 850 through the level parameter, which the surface-only feed did not. Vertical velocity and wind at level are still absent, so CARI is closer but not complete.",
+      "key": "pmd_hourtpe",
+      "label": "Hourly Precipitation",
+      "unit": "mm",
+      "category": "rainfall",
+      "temporal": true,
+      "min": 0, "max": 50,
+      "palette": "rainfall",
+      "legendTitle": "Hourly Precipitation (mm)"
+    },
+    {
+      "key": "pmd_rhu_700",
+      "label": "Relative Humidity 700 hPa",
+      "unit": "%",
+      "category": "moisture",
+      "temporal": true,
+      "min": 0, "max": 100,
+      "palette": "continuous",
+      "legendTitle": "Relative Humidity 700hPa (%)"
+    },
+    {
+      "key": "pmd_rhu_500",
+      "label": "Relative Humidity 500 hPa",
+      "unit": "%",
+      "category": "moisture",
+      "temporal": true,
+      "min": 0, "max": 100,
+      "palette": "continuous",
+      "legendTitle": "Relative Humidity 500hPa (%)"
+    },
+    {
+      "key": "pmd_tem_850",
+      "label": "Temperature 850 hPa",
+      "unit": "C",
+      "category": "instability",
+      "temporal": true,
+      "min": -20, "max": 30,
+      "palette": "plasma",
+      "legendTitle": "Temperature 850hPa (C)"
     }
   ]
 }

@@ -8,10 +8,11 @@ backend about a display range or a class boundary.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.db import repositories
 from app.shared import contracts, timeutil
+from app.shared.errors import NotConfigured, ValidationFailed
 
 router = APIRouter()
 
@@ -30,6 +31,28 @@ async def bands() -> dict:
 async def layers() -> dict:
     """Vector and raster layer definitions. The map is built from this."""
     return contracts.layers()
+
+
+@router.get("/layer-extent")
+async def layer_extent(layer: str = Query(..., description="Layer id from layers.json")) -> dict:
+    """The geographic extent of a layer, for the zoom-to-layer control.
+
+    Every layer id is checked against the contract first, so this cannot be
+    turned into a probe for arbitrary tables. Computed from the actual geometry,
+    so IIOJK frames the north and a future events layer frames its points rather
+    than everything defaulting to the whole country.
+    """
+    cfg = contracts.layers()
+    known = {entry["id"] for entry in cfg.get("layers", [])} | {
+        entry["id"] for entry in cfg.get("rasterLayers", [])
+    }
+    if layer not in known:
+        raise ValidationFailed(f"Unknown layer {layer!r}. See /api/meta/layers.")
+
+    extent = await repositories.layer_extent(layer)
+    if extent is None:
+        raise NotConfigured(layer, f"the {layer} layer has no features to frame yet")
+    return {"layer": layer, "extent": extent}
 
 
 @router.get("/basemaps")
@@ -68,36 +91,54 @@ async def models() -> dict:
 
 
 @router.get("/forecast")
-async def forecast_meta() -> dict:
-    """Cycle discovery. Call this first, the whole timeline derives from it.
+async def forecast_meta(
+    model: str | None = Query(None, description="PMD data_type; omit for the newest model overall"),
+) -> dict:
+    """Cycle discovery, per model. Call this first, the whole timeline derives
+    from it, and call it again when the active model changes.
 
-    Returns the leads the latest cycle actually published rather than the
-    theoretical grid, because a cycle publishes incrementally and may skip a
-    grid point.
+    Every model that has a cycle is listed in `availableModels`, so the panel can
+    offer a selector. The chosen model (the one requested, or the newest overall)
+    drives `creationTime` and `publishedLeads`, which are the leads that cycle
+    actually published rather than the theoretical grid.
     """
-    cycle = await repositories.latest_cycle()
     time_model = contracts.time_model()
+    models = await repositories.forecast_models()
+    available = [
+        {
+            "model": m["model"],
+            "creationTime": m["creation_time"],
+            "leadCount": len(m["published_leads"] or []),
+        }
+        for m in models
+    ]
 
-    if cycle is None:
+    if not models:
         return {
             "status": "no_data",
             "message": (
                 "No forecast cycle has been ingested yet. See "
                 ".claude/playbooks/ingest-raster-source.md."
             ),
-            "model": time_model["model"],
+            "model": None,
+            "availableModels": [],
             "leadGrid": timeutil.lead_grid(),
             "minLeadHours": time_model["history"]["minLeadHours"],
             "historyStepHours": time_model["history"]["stepHours"],
         }
 
-    cycles = await repositories.available_cycles()
+    chosen = next((m for m in models if m["model"] == model), None) if model else None
+    if chosen is None:
+        chosen = max(models, key=lambda m: m["creation_time"])
+
+    cycles = await repositories.available_cycles(chosen["model"])
 
     return {
         "status": "ok",
-        "model": cycle["model"],
-        "creationTime": cycle["creation_time"],
-        "publishedLeads": list(cycle["published_leads"] or []),
+        "model": chosen["model"],
+        "availableModels": available,
+        "creationTime": chosen["creation_time"],
+        "publishedLeads": list(chosen["published_leads"] or []),
         "leadGrid": timeutil.lead_grid(),
         "minLeadHours": time_model["history"]["minLeadHours"],
         "historyStepHours": time_model["history"]["stepHours"],

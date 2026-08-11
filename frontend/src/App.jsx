@@ -14,12 +14,16 @@ import LayersPanel from '@/components/LayersPanel'
 import MapControls from '@/components/MapControls'
 import Navbar from '@/components/Navbar'
 import StatusBanner from '@/components/StatusBanner'
+import TimeSlider from '@/components/TimeSlider'
 import MapView from '@/features/map/MapView'
 import { useContracts } from '@/hooks/useContracts'
+import { useForecast } from '@/hooks/useForecast'
+import { useRasterAvailability } from '@/hooks/useRasterAvailability'
 import { useTheme } from '@/hooks/useTheme'
+import { getLayerExtent } from '@/lib/api'
 import { availableBasemaps, defaultBasemapId, hasMapboxToken } from '@/lib/basemaps'
-import { contracts } from '@/lib/contracts'
-import { DEFAULT_BOUNDS, fitToBounds } from '@/lib/map'
+import { contracts, rasterScale } from '@/lib/contracts'
+import { DEFAULT_BOUNDS, fitToBounds, fitToExtent } from '@/lib/map'
 
 // Feature counts for the layer rows. Known from the ingest, and worth showing
 // because "Tehsils 553" tells you the layer loaded and "Tehsils 0" tells you it
@@ -53,10 +57,75 @@ export default function App () {
   const [projection, setProjection] = useState('mercator')
   const [layersCollapsed, setLayersCollapsed] = useState(false)
   const [panelsOpen, setPanelsOpen] = useState(true)
+  const [leadIndex, setLeadIndex] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const [activeModelId, setActiveModelId] = useState(null)
+  const [levelChoice, setLevelChoice] = useState({})
   const initialBasemapRef = useRef(null)
 
   const ready = contractState.status === 'ready'
   const layers = useMemo(() => (ready ? contracts().layers : []), [ready])
+  const rasterLayers = useMemo(() => (ready ? contracts().rasterLayers : []), [ready])
+
+  // Which raster layers can actually serve a tile today. Declared in the
+  // contract is not the same as ingested, and the panel says which is which.
+  const { availability } = useRasterAvailability(rasterLayers)
+
+  // The forecast models, in contract order, with the data_type each resolves
+  // against. One is active at a time and drives the map and the timeline.
+  const forecastModels = useMemo(() => {
+    const out = []
+    const seen = new Set()
+    for (const l of rasterLayers) {
+      if (l.source !== 'pmd' || seen.has(l.modelId)) continue
+      seen.add(l.modelId)
+      out.push({ modelId: l.modelId, model: l.model, modelLabel: l.modelLabel })
+    }
+    return out
+  }, [rasterLayers])
+
+  const activeModel = forecastModels.find((m) => m.modelId === activeModelId) ?? null
+
+  // Default the active model once availability is known: the first model with an
+  // ingested cycle, or the first in the contract if none has landed yet.
+  useEffect(() => {
+    if (activeModelId || forecastModels.length === 0) return
+    const withCycle = forecastModels.find((m) =>
+      rasterLayers.some((l) => l.source === 'pmd' && l.modelId === m.modelId && availability[l.id]?.ok)
+    )
+    setActiveModelId((withCycle ?? forecastModels[0]).modelId)
+  }, [activeModelId, forecastModels, rasterLayers, availability])
+
+  // The forecast cycle behind the time slider, for the active model. Keyed on
+  // how many raster bands are catalogued, so it reloads the moment an ingest
+  // lands a cycle, and on the active model, so switching model reloads its run.
+  const availabilitySignal = Object.values(availability).filter((a) => a?.ok).length
+  const forecast = useForecast(activeModel?.model ?? null, availabilitySignal)
+  const leads = forecast.leads
+  const activeLead = leads.length ? leads[Math.min(leadIndex, leads.length - 1)] : null
+
+  // Temporal layers currently shown for the active model, for the slider to name
+  // what the time applies to. The level is spelled out when it is not surface.
+  const activeTemporalLabels = useMemo(
+    () => rasterLayers
+      .filter((l) => l.temporal && l.modelId === activeModelId && visibleLayers.has(l.id))
+      .map((l) => (l.level ? `${l.label} ${l.levelLabel}` : l.label)),
+    [rasterLayers, visibleLayers, activeModelId]
+  )
+
+  // Clamp the lead index if a new cycle publishes fewer steps than the old one.
+  useEffect(() => {
+    if (leadIndex > leads.length - 1) setLeadIndex(Math.max(0, leads.length - 1))
+  }, [leads.length, leadIndex])
+
+  // Legend scales for the raster rows, built from the palette and the display
+  // range the gateway colours the tiles with.
+  const scales = useMemo(() => {
+    if (!ready) return {}
+    return Object.fromEntries(
+      rasterLayers.map((l) => [l.id, rasterScale(l)]).filter(([, scale]) => scale)
+    )
+  }, [ready, rasterLayers])
 
   // Seed visibility from the contract once, then it belongs to the user.
   useEffect(() => {
@@ -88,12 +157,75 @@ export default function App () {
     })
   }, [])
 
+  // Show all means show everything that can draw. Switching on a layer whose
+  // data is not ingested would produce a row of failed tile requests and an
+  // error banner, which is not what pressing "show all" is asking for. Only the
+  // active model's forecast layers are turned on, since one model draws at a time.
+  const showAll = useCallback(() => {
+    setVisibleLayers(new Set([
+      ...layers.map((l) => l.id),
+      ...rasterLayers
+        .filter((l) => availability[l.id]?.ok && (l.source !== 'pmd' || l.modelId === activeModelId))
+        .map((l) => l.id)
+    ]))
+  }, [layers, rasterLayers, availability, activeModelId])
+
+  // One model draws at a time. Switching drops the previous model's forecast
+  // layers from view, resets the timeline to the first lead, and lets the new
+  // model's cycle take over the slider.
+  const selectModel = useCallback((modelId) => {
+    setActiveModelId(modelId)
+    setLeadIndex(0)
+    setVisibleLayers((current) => {
+      const next = new Set(current)
+      for (const l of rasterLayers) {
+        if (l.source === 'pmd' && l.modelId !== modelId) next.delete(l.id)
+      }
+      return next
+    })
+  }, [rasterLayers])
+
+  // Pick a pressure level for a forecast element. If that element is currently
+  // shown, move visibility to the newly selected level so the map follows the
+  // dropdown without a second click.
+  const selectLevel = useCallback((modelId, element, level) => {
+    setLevelChoice((current) => ({ ...current, [`${modelId}:${element}`]: level }))
+    setVisibleLayers((current) => {
+      const variants = rasterLayers.filter(
+        (l) => l.source === 'pmd' && l.modelId === modelId && l.element === element
+      )
+      const shown = variants.find((v) => current.has(v.id))
+      const target = variants.find((v) => v.level === level)
+      if (!shown || !target || shown.id === target.id) return current
+      const next = new Set(current)
+      next.delete(shown.id)
+      next.add(target.id)
+      return next
+    })
+  }, [rasterLayers])
+
   const setOpacity = useCallback((id, value) => {
     setOpacities((current) => ({ ...current, [id]: value }))
   }, [])
 
   const zoomToPakistan = useCallback(() => {
     if (map) fitToBounds(map, DEFAULT_BOUNDS, 56)
+  }, [map])
+
+  // Frame a single layer at its own extent, asked of the API which computes it
+  // from the layer's geometry. Most layers are national, so they land close to
+  // the Pakistan view, but IIOJK frames the north and a points layer would frame
+  // its points. Falls back to the national bounds if the layer has no features
+  // yet or the request fails, so the button never does nothing.
+  const zoomToLayer = useCallback(async (layerId) => {
+    if (!map) return
+    try {
+      const { extent } = await getLayerExtent(layerId)
+      if (extent) fitToExtent(map, extent, 64)
+      else fitToBounds(map, DEFAULT_BOUNDS, 56)
+    } catch {
+      fitToBounds(map, DEFAULT_BOUNDS, 56)
+    }
   }, [map])
 
   const locate = useCallback(() => {
@@ -157,10 +289,13 @@ export default function App () {
       <main className="relative min-h-0 flex-1">
         <MapView
           layers={layers}
+          rasterLayers={rasterLayers}
           visibleLayers={visibleLayers}
           opacities={opacities}
           basemap={activeBasemap}
           projection={projection}
+          creationTime={forecast.creationTime}
+          leadHours={activeLead}
           onMapReady={setMap}
           onSelectFeature={setSelection}
         />
@@ -172,13 +307,21 @@ export default function App () {
             {panelsOpen ? (
               <LayersPanel
                 layers={layers}
+                rasterLayers={rasterLayers}
+                availability={availability}
                 visibleLayers={visibleLayers}
                 onToggleLayer={toggleLayer}
-                onShowAll={() => setVisibleLayers(new Set(layers.map((l) => l.id)))}
+                onZoomToLayer={zoomToLayer}
+                onShowAll={showAll}
                 onHideAll={() => setVisibleLayers(new Set())}
                 counts={COUNTS}
+                scales={scales}
                 opacities={opacities}
                 onOpacity={setOpacity}
+                activeModelId={activeModelId}
+                onSelectModel={selectModel}
+                levelChoice={levelChoice}
+                onSelectLevel={selectLevel}
                 collapsed={layersCollapsed}
                 onCollapse={() => setLayersCollapsed((v) => !v)}
               />
@@ -202,17 +345,28 @@ export default function App () {
             </div>
           </div>
 
-          {/* The bottom rail is now the forecast timeline's alone. The basemap
-              switcher moved into the top right control stack. */}
-          <div className="flex shrink-0 items-end justify-end gap-3 pt-3">
-            {/* Left for the forecast timeline, which needs a cycle to exist
-                before it can honestly show anything. */}
-            <div className="pointer-events-auto flex items-center gap-2 rounded-cb-sm border border-amber-border bg-amber-soft px-3 py-2">
-              <TbAlertTriangle className="shrink-0 text-[14px] text-amber" aria-hidden />
-              <span className="text-[11.5px] font-medium text-amber">
-                No forecast cycle ingested yet, so scoring layers are unavailable
-              </span>
-            </div>
+          {/* The bottom rail is the forecast timeline. It shows the time slider
+              once a cycle is ingested, and says so plainly until then. */}
+          <div className="flex shrink-0 items-end justify-center gap-3 pt-3">
+            {forecast.status === 'ok' && leads.length ? (
+              <TimeSlider
+                cycle={forecast.creationTime}
+                model={activeModel?.modelLabel ?? forecast.model}
+                leads={leads}
+                index={Math.min(leadIndex, leads.length - 1)}
+                onIndex={setLeadIndex}
+                playing={playing}
+                onPlayToggle={() => setPlaying((v) => !v)}
+                activeLayers={activeTemporalLabels}
+              />
+            ) : (
+              <div className="pointer-events-auto flex items-center gap-2 rounded-cb-sm border border-amber-border bg-amber-soft px-3 py-2">
+                <TbAlertTriangle className="shrink-0 text-[14px] text-amber" aria-hidden />
+                <span className="text-[11.5px] font-medium text-amber">
+                  No forecast cycle ingested yet, so the timeline and scoring layers are unavailable
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </main>

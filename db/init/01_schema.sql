@@ -235,11 +235,16 @@ CREATE INDEX events_geom_gix ON obs.events USING GIST (geom);
 CREATE INDEX events_loc_ix   ON obs.events (location_name);
 
 -- ---------------------------------------------------------------- forecast
+-- A cycle is identified by (model, creation_time), not creation_time alone:
+-- several models publish a run at the same hour (GRAPES and WRFPRS both at
+-- 2026081000), so the model is part of the key. model is the PMD data_type,
+-- e.g. GRAPES, WRFPRS, ICON, D1D.
 CREATE TABLE wx.cycles (
-  creation_time   timestamptz PRIMARY KEY,
-  model           text NOT NULL DEFAULT 'ECMWF IFS OPER',
+  model           text NOT NULL,
+  creation_time   timestamptz NOT NULL,
   published_leads integer[] NOT NULL DEFAULT '{}',
-  discovered_at   timestamptz NOT NULL DEFAULT now()
+  discovered_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (model, creation_time)
 );
 COMMENT ON COLUMN wx.cycles.published_leads IS
   'Leads this cycle actually published. A cycle publishes incrementally and may skip a grid point, so never assume the full grid.';
@@ -247,7 +252,8 @@ COMMENT ON COLUMN wx.cycles.published_leads IS
 CREATE TABLE wx.raster_catalog (
   id            bigserial PRIMARY KEY,
   band_key      text NOT NULL,
-  creation_time timestamptz REFERENCES wx.cycles(creation_time) ON DELETE CASCADE,
+  model         text,
+  creation_time timestamptz,
   lead_hours    integer,
   path          text NOT NULL,
   unit          text,
@@ -255,12 +261,19 @@ CREATE TABLE wx.raster_catalog (
   max_value     double precision,
   nodata        double precision,
   is_static     boolean NOT NULL DEFAULT false,
-  created_at    timestamptz NOT NULL DEFAULT now()
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  -- MATCH SIMPLE (the default) skips the check when any referencing column is
+  -- NULL, so static terrain rows (model and creation_time NULL) are exempt while
+  -- forecast rows are enforced against a real cycle.
+  FOREIGN KEY (model, creation_time) REFERENCES wx.cycles(model, creation_time) ON DELETE CASCADE
 );
-CREATE UNIQUE INDEX raster_catalog_uix ON wx.raster_catalog (band_key, COALESCE(creation_time, 'epoch'::timestamptz), COALESCE(lead_hours, -9999));
-CREATE INDEX raster_catalog_lookup_ix ON wx.raster_catalog (creation_time, lead_hours, band_key);
+-- band_key repeats across models (pmd_cape under both GRAPES and WRFPRS), so the
+-- model is part of the uniqueness. band_key already carries the level for
+-- pressure fields (pmd_rhu_700), so level needs no separate column.
+CREATE UNIQUE INDEX raster_catalog_uix ON wx.raster_catalog (band_key, COALESCE(model, ''), COALESCE(creation_time, 'epoch'::timestamptz), COALESCE(lead_hours, -9999));
+CREATE INDEX raster_catalog_lookup_ix ON wx.raster_catalog (model, creation_time, lead_hours, band_key);
 COMMENT ON TABLE wx.raster_catalog IS
-  'Maps a band, cycle and lead to a COG path. The API resolves paths through here so a caller can never pass a filesystem path.';
+  'Maps a band, model, cycle and lead to a COG path. The API resolves paths through here so a caller can never pass a filesystem path.';
 
 -- Zonal values per district, the input to every scoring model.
 CREATE TABLE wx.district_values (

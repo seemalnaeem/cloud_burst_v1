@@ -79,7 +79,7 @@ def previous_published(hours: int, published: list[int]) -> int:
     previous, so the contract says treat previous as 0 and use the first
     available positive lead as current.
     """
-    ordered = sorted(l for l in published if l < hours)
+    ordered = sorted(lead for lead in published if lead < hours)
     if ordered:
         return ordered[-1]
     return 0

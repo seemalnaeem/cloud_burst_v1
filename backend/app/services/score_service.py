@@ -44,7 +44,13 @@ class _Job:
         return False
 
 
-async def _resolve(forecast_hours: int) -> timeutil.ResolvedCycle:
+async def _resolve(forecast_hours: int) -> tuple[timeutil.ResolvedCycle, str]:
+    """Resolve the scoring cycle and the model it belongs to.
+
+    The model is returned alongside because the raster catalogue is now keyed on
+    it: the same band exists under several models, so a path lookup that omits the
+    model is ambiguous. Scoring uses the newest cycle across all models.
+    """
     cycle = await repositories.latest_cycle()
     if cycle is None:
         raise NotConfigured(
@@ -52,17 +58,22 @@ async def _resolve(forecast_hours: int) -> timeutil.ResolvedCycle:
             "forecast scoring, no cycle has been ingested yet",
         )
 
-    cycles = [c["creation_time"] for c in await repositories.available_cycles()]
-    return timeutil.resolve_cycle(
-        forecast_hours,
-        cycle["creation_time"],
-        cycles,
-        list(cycle["published_leads"] or []),
+    model = cycle["model"]
+    cycles = [c["creation_time"] for c in await repositories.available_cycles(model)]
+    return (
+        timeutil.resolve_cycle(
+            forecast_hours,
+            cycle["creation_time"],
+            cycles,
+            list(cycle["published_leads"] or []),
+        ),
+        model,
     )
 
 
 async def _raster_paths(
     variables: list[dict],
+    model: str,
     creation_time: datetime,
     lead_hours: int,
 ) -> dict[str, str]:
@@ -75,7 +86,7 @@ async def _raster_paths(
     missing: list[str] = []
 
     for spec in variables:
-        path = await repositories.raster_path(spec["band"], creation_time, lead_hours)
+        path = await repositories.raster_path(spec["band"], model, creation_time, lead_hours)
         if path is None:
             missing.append(spec["band"])
         else:
@@ -95,7 +106,7 @@ async def cari_for_district(
     forecast_hours: int,
     matrix: str | None,
 ) -> dict[str, Any]:
-    cycle = await _resolve(forecast_hours)
+    cycle, model = await _resolve(forecast_hours)
     info = await repositories.district_geometry(district)
     chosen = matrix or cari_model.terrain_class(info["province"], district)
 
@@ -107,7 +118,7 @@ async def cari_for_district(
         return _envelope(cycle, district, chosen, cached, from_cache=True)
 
     specs = cari_model.variable_specs()
-    paths = await _raster_paths(specs, cycle.creation_time, cycle.lead_hours)
+    paths = await _raster_paths(specs, model, cycle.creation_time, cycle.lead_hours)
 
     reducers = cari_model.reducers()
     clamps = {s["key"]: tuple(s["clamp"]) for s in specs if "clamp" in s}
@@ -172,7 +183,7 @@ async def cari_all(forecast_hours: int, matrix: str | None) -> dict[str, Any]:
     boundaries from vector tiles, and resending them here is what made the old
     equivalent 190 MB.
     """
-    cycle = await _resolve(forecast_hours)
+    cycle, _model = await _resolve(forecast_hours)
     districts = await repositories.list_districts()
 
     results = []
@@ -212,14 +223,14 @@ async def cari_all(forecast_hours: int, matrix: str | None) -> dict[str, Any]:
 
 
 async def susceptibility(forecast_hours: int) -> dict[str, Any]:
-    cycle = await _resolve(forecast_hours)
+    cycle, model = await _resolve(forecast_hours)
     conditions = susc_model.conditions()
     districts = await repositories.list_districts()
 
     band_paths: dict[str, str] = {}
     missing: list[str] = []
     for band in sorted(susc_model.required_bands()):
-        path = await repositories.raster_path(band, cycle.creation_time, cycle.lead_hours)
+        path = await repositories.raster_path(band, model, cycle.creation_time, cycle.lead_hours)
         if path is None:
             missing.append(band)
         else:
@@ -283,7 +294,7 @@ async def hotspot_verify(forecast_hours: int, district: str | None) -> dict[str,
     """
     conditions = hotspot_model.conditions()
     try:
-        cycle = await _resolve(forecast_hours)
+        cycle, _model = await _resolve(forecast_hours)
     except NotConfigured:
         return {
             "status": "no_data",

@@ -4,14 +4,25 @@ A LAN dev stack, but these will bite regardless.
 
 ## Secrets
 
-**There is no credential in this project.** Every source is anonymous HTTP or anonymous S3; Earth
-Engine and GeoServer are ruled out. If something appears to need a key, find another source.
-[[no-authenticated-sources]]
+Every data source was anonymous HTTP or anonymous S3, with two named credentials admitted by the
+owner as deliberate exceptions. Do not add a third without the same explicit sign off, and do not
+cite these to justify one. [[no-authenticated-sources]]
+
+1. **`VITE_MAPBOX_TOKEN`** (2026-08-06). A public client basemap token, not a data credential. Reaches
+   the browser by design, restricted by URL in the Mapbox account, blank is supported.
+2. **`PMD_USER` / `PMD_PASS`** (2026-08-10). The owner's account on the PMD early warning portal
+   (`PMD_BASE`, currently `https://115.186.56.181:12304`), which serves the ECMWF / WRF / CFS forecast
+   fields the CARI models need. This **is** a data credential and a real reversal of the anonymous
+   rule, admitted because the owner is authorised to use PMD's own feed and no anonymous equivalent
+   carries these exact fields for Pakistan. It is server side only, never reaches the browser, and
+   lives only in `.env`. The server presents a self-signed certificate, so the ingest disables TLS
+   verification for that host and only that host.
 
 Never commit `.env`. `.claude/settings.json` denies reading it plus `secrets/**` and
 `*service-account*.json`. The database password is `postgres` deliberately, which means the Postgres
-port must not be exposed beyond the LAN. Never log a connection string, token or Authorization
-header; each tier's logger has a redaction list, add to it rather than remembering.
+port must not be exposed beyond the LAN. Never log a connection string, token, cookie or
+Authorization header; each tier's logger has a redaction list, add to it rather than remembering. The
+PMD `ews_jwt` cookie and password belong on that list.
 
 ## Proxy safety
 

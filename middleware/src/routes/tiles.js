@@ -9,6 +9,7 @@ import { Router } from 'express'
 
 import { config } from '../config.js'
 import { layers, bands, palettes } from '../lib/contracts.js'
+import { EMPTY_TILE } from '../lib/emptyTile.js'
 import { AppError } from '../lib/errors.js'
 import { http } from '../lib/http.js'
 import { logger } from '../lib/logger.js'
@@ -59,9 +60,17 @@ tilesRouter.get('/tiles/:layer/:z/:x/:y.pbf', async (req, res, next) => {
 /**
  * Raster tiles.
  *
- * Rescale range and colormap come from the contracts, not from the query
- * string. That is what stops a legend and its tiles from ever disagreeing: they
- * read the same numbers.
+ * Rescale range, palette and resampling all come from the API's resolve call,
+ * not from the query string and not from a second lookup here. The API reads
+ * them out of the same contract the legend reads, so a tile and the legend
+ * describing it cannot disagree.
+ *
+ * Deriving them here from a `band` query parameter was the earlier design and
+ * it had a hole: a layer that is not band driven sends no band, so there was
+ * nothing to derive from, and the tile went out with no rescale and no colormap
+ * at all. A 16 bit elevation raster rendered that way is a black square. The
+ * resolver already knows the band a layer maps to, so it is the one that should
+ * answer.
  */
 tilesRouter.get('/raster/:layer/:z/:x/:y.png', async (req, res, next) => {
   try {
@@ -69,9 +78,8 @@ tilesRouter.get('/raster/:layer/:z/:x/:y.png', async (req, res, next) => {
     const { z, x, y } = tileCoords(req.params.z, req.params.x, req.params.y)
 
     const bandKey = req.query.band ? String(req.query.band) : null
-    const band = bandKey ? bandByKey(bandKey) : null
 
-    if (bandKey && !band) {
+    if (bandKey && !bandByKey(bandKey)) {
       throw new AppError('VALIDATION_FAILED', `Unknown band ${bandKey}. See /api/meta/bands.`)
     }
 
@@ -81,6 +89,9 @@ tilesRouter.get('/raster/:layer/:z/:x/:y.png', async (req, res, next) => {
     const resolveUrl = new URL(`${config.upstreams.api}/api/raster/resolve`)
     resolveUrl.searchParams.set('layer', id)
     if (bandKey) resolveUrl.searchParams.set('band', bandKey)
+    // The model selects which forecast run backs a temporal layer, since the same
+    // band exists under several models. Absent for static and computed layers.
+    if (req.query.model) resolveUrl.searchParams.set('model', String(req.query.model))
     if (req.query.creation_time) resolveUrl.searchParams.set('creation_time', String(req.query.creation_time))
     if (req.query.lead) resolveUrl.searchParams.set('lead', String(req.query.lead))
 
@@ -96,22 +107,40 @@ tilesRouter.get('/raster/:layer/:z/:x/:y.png', async (req, res, next) => {
     const tileUrl = new URL(`${config.upstreams.raster}/cog/tiles/WebMercatorQuad/${z}/${x}/${y}.png`)
     tileUrl.searchParams.set('url', resolved.path)
 
-    if (band) {
-      tileUrl.searchParams.set('rescale', `${band.min},${band.max}`)
-      const paletteName = band.palette
-      const palette = palettes()[paletteName]
-      if (palette?.colors) {
-        tileUrl.searchParams.set('colormap', JSON.stringify(buildColormap(palette, band)))
+    const palette = resolved.palette ? palettes()[resolved.palette] : null
+
+    if (resolved.categorical) {
+      // No rescale for categorical data. The colormap keys are the codes
+      // themselves, and rescaling would move them somewhere else entirely.
+      // Nor may it be interpolated: averaging codes 1 and 5 gives 3, which is a
+      // different category.
+      tileUrl.searchParams.set('resampling', 'nearest')
+      if (palette) {
+        tileUrl.searchParams.set('colormap', JSON.stringify(buildColormap(palette)))
       }
-      // Categorical data must not be interpolated. Averaging codes 1 and 5
-      // gives 3, which is a different category entirely.
-      if (band.categorical) tileUrl.searchParams.set('resampling', 'nearest')
+    } else if (resolved.min != null && resolved.max != null) {
+      tileUrl.searchParams.set('rescale', `${resolved.min},${resolved.max}`)
+      if (palette) {
+        tileUrl.searchParams.set('colormap', JSON.stringify(buildColormap(palette)))
+      }
     }
 
-    const upstream = await http.stream(tileUrl.toString(), { timeoutMs: 60000 })
+    // 404 from the tiler means the tile does not intersect the raster, which
+    // for a country shaped dataset on a square tile grid is most of the tiles
+    // the map asks for. It is an answer, not a failure.
+    const upstream = await http.stream(tileUrl.toString(), {
+      timeoutMs: 60000,
+      allowStatus: [404]
+    })
 
     res.setHeader('Content-Type', 'image/png')
     res.setHeader('Cache-Control', config.cacheControl.rasterTiles)
+
+    if (upstream.statusCode === 404) {
+      await upstream.body.dump()
+      return res.status(200).end(EMPTY_TILE)
+    }
+
     upstream.body.pipe(res)
   } catch (err) {
     next(err)
@@ -121,19 +150,38 @@ tilesRouter.get('/raster/:layer/:z/:x/:y.png', async (req, res, next) => {
 /**
  * Build a TiTiler colormap from a contract palette.
  *
- * Continuous palettes become evenly spaced value ranges across the band's
- * display range. Categorical palettes map each code to its color directly.
+ * Categorical palettes map each code to its color directly, on raw values.
+ *
+ * Continuous palettes are expressed over 0 to 255, NOT over the band's own
+ * range, and that is the whole subtlety of this function. TiTiler applies
+ * `rescale` first, which linearly maps the display range onto 0 to 255, and only
+ * then applies the colormap. Intervals written in data units therefore match
+ * nothing at all: every pixel falls outside every interval and the tile comes
+ * back transparent. It is a convincing failure, because the request is a 200
+ * with a valid PNG in it, the COG is fine, and the same URL without the colormap
+ * renders correctly.
+ *
+ * Rescaling first is also what makes the range clamp rather than drop out. The
+ * DEM reaches 8526 m against a 5000 m ceiling, and those pixels saturate to the
+ * last colour instead of turning into holes in the mountains.
+ *
+ * The step count matches the palette exactly, and the legend divides its own
+ * range into the same number of blocks, so the nth colour on the map and the nth
+ * block in the legend describe the same interval.
  */
-function buildColormap (palette, band) {
+function buildColormap (palette) {
   if (palette.kind === 'categorical') {
     return Object.fromEntries(palette.entries.map((e) => [e.code, hexToRgba(e.color)]))
   }
 
   const colors = palette.colors
-  const span = (band.max - band.min) / colors.length
+  const span = 256 / colors.length
 
   return colors.map((color, i) => [
-    [band.min + i * span, band.min + (i + 1) * span],
+    // The last interval closes at 256 rather than 255. The comparison is a half
+    // open [start, stop), so stopping at 255 would leave the single brightest
+    // value uncoloured: one transparent pixel exactly on the highest peaks.
+    [Math.round(i * span), i === colors.length - 1 ? 256 : Math.round((i + 1) * span)],
     hexToRgba(color)
   ])
 }

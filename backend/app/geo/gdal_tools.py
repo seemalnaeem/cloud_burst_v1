@@ -109,6 +109,41 @@ def _run(cmd: list[str]) -> None:
         )
 
 
+def cog_creation_options(
+    *,
+    float_data: bool = True,
+    compress: str = "DEFLATE",
+    overviews: str = "AUTO",
+    resampling: str = "AVERAGE",
+    blocksize: int = 512,
+) -> list[str]:
+    """The -co flags that make a GeoTIFF cloud optimized, in one place.
+
+    Shared by to_cog and by the tools that can write a COG directly, gdaldem
+    among them. Deriving slope through a plain GeoTIFF first would put a 13 GB
+    Float32 intermediate on disk for a DEM this size, so writing the COG in one
+    pass is not a micro optimisation.
+
+    Predictor 3 is for floating point, 2 for integers. Backwards makes the file
+    bigger rather than smaller.
+
+    OVERVIEWS=AUTO reuses whatever pyramids the source already carries.
+    IGNORE_EXISTING rebuilds them, which is what you want when the source
+    overviews were built with an unknown or unsuitable resampling method.
+    """
+    return [
+        "-co", f"COMPRESS={compress}",
+        "-co", f"PREDICTOR={'3' if float_data else '2'}",
+        "-co", f"BLOCKSIZE={blocksize}",
+        "-co", f"OVERVIEWS={overviews}",
+        "-co", f"RESAMPLING={resampling}",
+        "-co", "NUM_THREADS=ALL_CPUS",
+        # Elevation at 1 arc second over Pakistan is 3.3 gigapixels, past the
+        # 4 GB point where a classic TIFF cannot address its own offsets.
+        "-co", "BIGTIFF=YES",
+    ]
+
+
 def to_cog(
     src: str | Path,
     dst: str | Path,
@@ -116,15 +151,15 @@ def to_cog(
     tmp_dir: str | Path = "/data/tmp",
     float_data: bool = True,
     compress: str = "DEFLATE",
+    overviews: str = "AUTO",
+    resampling: str = "AVERAGE",
+    blocksize: int = 512,
 ) -> Path:
     """Convert to a Cloud Optimized GeoTIFF.
 
     Writes into tmp_dir and moves into place at the end. TiTiler will serve a
     half written file quite happily and the result looks like corruption in the
     browser with no error anywhere.
-
-    Predictor 3 is for floating point, 2 for integers. Backwards makes the file
-    bigger rather than smaller.
     """
     dst = Path(dst)
     staging = Path(tmp_dir) / dst.name
@@ -132,17 +167,45 @@ def to_cog(
 
     _run([
         "gdal_translate", "-of", "COG",
-        "-co", f"COMPRESS={compress}",
-        "-co", f"PREDICTOR={'3' if float_data else '2'}",
-        "-co", "BLOCKSIZE=512",
-        "-co", "OVERVIEWS=AUTO",
-        "-co", "NUM_THREADS=ALL_CPUS",
+        *cog_creation_options(
+            float_data=float_data,
+            compress=compress,
+            overviews=overviews,
+            resampling=resampling,
+            blocksize=blocksize,
+        ),
         str(src), str(staging),
     ])
 
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(staging), str(dst))
     return dst
+
+
+def resample_to(
+    src: str | Path,
+    dst: str | Path,
+    *,
+    resolution: float,
+    resampling: str = "max",
+) -> Path:
+    """Warp to a coarser grid at a fixed resolution, in the source CRS units.
+
+    The resampling method is a scoring decision here, not a quality knob. The
+    legacy models reduce elevation and slope with a max reducer, so a district's
+    worst case cell drives its terrain conditions. Averaging instead flattens
+    every mountain district and quietly changes every score.
+    """
+    _run([
+        "gdalwarp",
+        "-tr", str(resolution), str(resolution),
+        "-r", resampling,
+        "-multi", "-wo", "NUM_THREADS=ALL_CPUS",
+        "-co", "COMPRESS=DEFLATE",
+        "-overwrite",
+        str(src), str(dst),
+    ])
+    return Path(dst)
 
 
 def reproject(
@@ -171,16 +234,33 @@ def reproject(
     return Path(dst)
 
 
-def slope_from_dem(dem: str | Path, dst: str | Path, *, geographic: bool = True) -> Path:
+def slope_from_dem(
+    dem: str | Path,
+    dst: str | Path,
+    *,
+    geographic: bool = True,
+    cog: bool = False,
+) -> Path:
     """Slope in degrees.
 
     The -s 111120 scale factor converts degrees of latitude and longitude into
     meters. A geographic DEM without it produces slope values off by orders of
     magnitude.
+
+    Which DEM you hand this is a scoring decision, not a resolution preference.
+    The models derive slope from an already reduced 5 km DEM, and slope over a
+    5 km run is far gentler than the same terrain over 30 m. See
+    .claude/memory/slope-is-computed-at-5km.md.
     """
     cmd = ["gdaldem", "slope", "-compute_edges"]
     if geographic:
         cmd += ["-s", "111120"]
+    if cog:
+        # Straight to COG. gdaldem writes Float32, so the plain GeoTIFF this
+        # would otherwise land in is four times the size of an Int16 DEM before
+        # compression, and for the native grid that is tens of gigabytes of
+        # intermediate nobody ever reads.
+        cmd += ["-of", "COG", *cog_creation_options(float_data=True)]
     cmd += [str(dem), str(dst)]
     _run(cmd)
     return Path(dst)

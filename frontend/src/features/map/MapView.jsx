@@ -21,17 +21,21 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 import { mapboxToken, styleUrl } from '@/lib/basemaps'
 import {
   DEFAULT_CENTER, DEFAULT_ZOOM,
-  addVectorLayer, layerIdsFor, setLayerOpacity, setLayerVisible
+  addRasterLayer, addVectorLayer, layerIdsFor, removeRasterLayer,
+  setLayerOpacity, setLayerVisible, setRasterOpacity, setRasterTime
 } from '@/lib/map'
 
 mapboxgl.accessToken = mapboxToken()
 
 export default function MapView ({
   layers,
+  rasterLayers = [],
   visibleLayers,
   opacities,
   basemap,
   projection,
+  creationTime = null,
+  leadHours = null,
   onMapReady,
   onSelectFeature,
   onHoverFeature
@@ -45,18 +49,26 @@ export default function MapView ({
   const [failure, setFailure] = useState(null)
 
   // Latest props without re-running the init effect. The map is created once.
-  const propsRef = useRef({ layers, visibleLayers, opacities })
-  propsRef.current = { layers, visibleLayers, opacities }
+  const propsRef = useRef({ layers, rasterLayers, visibleLayers, opacities, creationTime, leadHours })
+  propsRef.current = { layers, rasterLayers, visibleLayers, opacities, creationTime, leadHours }
 
   /** Put every contract layer on the map. Safe to call repeatedly. */
   const installLayers = useCallback(() => {
     const map = mapRef.current
     if (!map || !map.getStyle()) return
-    const { layers: defs, visibleLayers: visible, opacities: op } = propsRef.current
+    const { layers: defs, rasterLayers: rasters, visibleLayers: visible, opacities: op,
+      creationTime: ct, leadHours: lh } = propsRef.current
 
+    // Vectors first. Rasters are inserted beneath the lowest vector layer, so
+    // there has to be one for them to go beneath.
     defs.forEach((def) => {
       addVectorLayer(map, def, visible.has(def.id))
       if (op[def.id] != null) setLayerOpacity(map, def, op[def.id])
+    })
+
+    rasters.forEach((def) => {
+      if (!visible.has(def.id)) return
+      addRasterLayer(map, def, { opacity: op[def.id] ?? def.opacity, creationTime: ct, leadHours: lh })
     })
   }, [])
 
@@ -82,10 +94,15 @@ export default function MapView ({
     mapRef.current = map
     styledWithRef.current = basemap
 
-    // Attribution only. The scale bar is deliberately absent: the project owner
-    // does not want it, and Mapbox attribution is a licence requirement so it
-    // stays regardless.
-    map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
+    // No Mapbox chrome at all. The scale bar and the attribution control are
+    // both off at the project owner's request, so the bottom right corner is
+    // clear. attributionControl: false above suppresses the control; the
+    // wordmark is hidden in index.css, since Mapbox GL re-adds it on every
+    // setStyle and there is no constructor option for it.
+    //
+    // Mapbox's terms of service require their attribution and wordmark to be
+    // visible on a map that uses their tiles. This was removed on instruction,
+    // so it is a deliberate choice by the project owner, not an oversight.
 
     // Fires on first load and after every setStyle.
     map.on('style.load', () => {
@@ -217,6 +234,51 @@ export default function MapView ({
       if (opacities[def.id] != null) setLayerOpacity(map, def, opacities[def.id])
     })
   }, [ready, layers, opacities])
+
+  // ------------------------------------------------------------- rasters
+  //
+  // Added and removed rather than hidden. A raster layer left on the map with
+  // visibility none still holds its tiles, and these are full resolution
+  // terrain, so an unused layer would sit on tens of megabytes of them.
+  //
+  // Opacity is applied separately, because addRasterLayer is idempotent and
+  // re-adding a source to change one paint property would discard every tile the
+  // browser had cached.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+
+    rasterLayers.forEach((def) => {
+      if (visibleLayers.has(def.id)) {
+        addRasterLayer(map, def, { opacity: opacities[def.id] ?? def.opacity, creationTime, leadHours })
+      } else {
+        removeRasterLayer(map, def.id)
+      }
+    })
+  }, [ready, rasterLayers, visibleLayers, opacities, creationTime, leadHours])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    rasterLayers.forEach((def) => {
+      if (opacities[def.id] != null) setRasterOpacity(map, def.id, opacities[def.id])
+    })
+  }, [ready, rasterLayers, opacities])
+
+  // ------------------------------------------------------------- forecast time
+  //
+  // Moving the slider swaps the tile template on each visible temporal source
+  // rather than rebuilding it, so scrubbing hours keeps the layer, its stack
+  // position and its opacity and only the pixels change.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready || creationTime == null || leadHours == null) return
+    rasterLayers.forEach((def) => {
+      if (def.temporal && visibleLayers.has(def.id)) {
+        setRasterTime(map, def, { creationTime, leadHours })
+      }
+    })
+  }, [ready, rasterLayers, visibleLayers, creationTime, leadHours])
 
   // ------------------------------------------------------------- basemap
   //

@@ -1,17 +1,37 @@
 // The layers dock.
 //
-// One row per layer: a toggle, the layer name, a feature count, and the legend
-// sitting directly underneath it. The legend is not behind a disclosure and not
-// in a separate panel, because the question "what does this colour mean" comes
-// up at exactly the moment you are looking at the layer list.
+// Dense by default, detail on demand, and read left to right: the name is the
+// first thing on every row, and the controls that act on it, framing and the
+// on/off toggle, sit together on the right where the thumb expects them. The
+// colour mark stays next to the name as the at-a-glance legend; the description,
+// the value ramp and the opacity slider live behind a chevron because they
+// answer a second question that only comes up once you have found your layer.
+//
+// Layers are grouped into collapsible sections because they behave differently,
+// not because grouping looks tidy. Boundaries are always there. Terrain is
+// static. Analysis is computed from a cycle. Forecast is temporal and, unlike
+// the rest, comes from several models at once, so it carries a model selector:
+// one model is active at a time and drives the map and the timeline, matching
+// how the source portal itself behaves. A field that a model serves at several
+// pressure levels collapses to one row with a level selector rather than a row
+// per level, so the section stays short.
 
-import { useState } from 'react'
-import { TbStack2, TbEye, TbEyeOff, TbAdjustmentsHorizontal, TbLayersOff } from 'react-icons/tb'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import {
+  TbStack2, TbEye, TbEyeOff, TbLayersOff, TbClockPause, TbClockHour4,
+  TbChevronRight, TbChevronDown, TbCheck, TbViewfinder
+} from 'react-icons/tb'
 
-import LayerLegend from './LayerLegend'
+import { LayerSwatch } from './LayerLegend'
 import { Panel, IconButton } from './ui/Panel'
 
-function Toggle ({ checked, onChange, color, label }) {
+// A rod-and-thumb switch: a thin fixed rod with a large thumb that rides along
+// it, a hollow ring when off and a solid disc when on. The thumb is SVG, not a
+// bordered div, so its stroke rasterises symmetrically about the geometry rather
+// than snapping to the device pixel grid one edge at a time, which is what drifts
+// a CSS-bordered dot off centre at Windows display scaling of 125 or 150 percent.
+function Toggle ({ checked, onChange, color, label, disabled }) {
   return (
     <button
       type="button"
@@ -19,84 +39,461 @@ function Toggle ({ checked, onChange, color, label }) {
       aria-checked={checked}
       aria-label={label}
       onClick={onChange}
-      className="relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-200"
-      style={{ background: checked ? color : 'var(--cb-toggle-off)' }}
+      disabled={disabled}
+      className={`relative h-5 w-10 shrink-0 ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
     >
       <span
-        className="absolute top-[2px] h-[14px] w-[14px] rounded-full bg-[var(--cb-knob)] transition-all duration-200"
-        style={{ left: checked ? '16px' : '2px', boxShadow: 'var(--cb-knob-shadow)' }}
+        className="pointer-events-none absolute left-[5px] right-[5px] top-[9px] h-[2px] rounded-full"
+        style={{ background: 'var(--cb-border-strong)' }}
       />
+      <svg
+        className="pointer-events-none absolute top-[1px] transition-[left] duration-300 ease-in-out"
+        style={{ left: checked ? '21px' : '1px' }}
+        width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"
+      >
+        <circle
+          cx="9" cy="9" r="6" strokeWidth="3"
+          style={{
+            fill: checked ? color : 'var(--cb-panel)',
+            stroke: checked ? color : 'var(--cb-muted)',
+            transition: 'fill 300ms ease-in-out, stroke 300ms ease-in-out'
+          }}
+        />
+      </svg>
     </button>
   )
 }
 
-function LayerRow ({ layer, visible, onToggle, count, scale, opacity, onOpacity }) {
-  const [tuning, setTuning] = useState(false)
+// A palette shown as one small chip, no gradient, so a raster layer's row reads
+// as "this is a scaled field" the way a swatch says "this is an outline".
+function RampChip ({ colors }) {
+  return (
+    <span className="flex h-3.5 w-3.5 shrink-0 overflow-hidden rounded-[3px] ring-1 ring-inset ring-[rgba(16,24,40,0.16)]">
+      {colors.map((c, i) => <span key={`${c}-${i}`} className="flex-1" style={{ background: c }} />)}
+    </span>
+  )
+}
+
+function DetailScale ({ scale }) {
+  if (!scale) return null
+
+  if (scale.kind === 'classes') {
+    return (
+      <ul className="mt-1.5 flex flex-col gap-1">
+        {scale.classes.map((c) => (
+          <li key={c.name ?? c.label ?? c.color} className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ background: c.color, border: '1px solid rgba(16,24,40,0.14)' }} />
+            <span className="min-w-0 flex-1 truncate text-[10.5px] text-text-2">{c.name ?? c.label}</span>
+            {c.max !== undefined && <span className="shrink-0 font-mono text-[9.5px] text-muted">{`<= ${c.max}`}</span>}
+          </li>
+        ))}
+      </ul>
+    )
+  }
+
+  if (scale.kind === 'steps') {
+    return (
+      <div className="mt-1.5">
+        <div className="flex h-2 overflow-hidden rounded-[2px] ring-1 ring-inset ring-[rgba(16,24,40,0.1)]">
+          {scale.colors.map((c, i) => <span key={`${c}-${i}`} className="flex-1" style={{ background: c }} />)}
+        </div>
+        <div className="mt-0.5 flex items-center justify-between font-mono text-[9.5px] text-muted">
+          <span>{scale.min}</span>
+          {scale.unit && <span className="font-sans">{scale.unit}</span>}
+          <span>{scale.max}</span>
+        </div>
+      </div>
+    )
+  }
+
+  return null
+}
+
+// The disclosure body shared by every row: description, value scale, opacity.
+function RowDetail ({ description, scale, opacity, onOpacity, color }) {
+  return (
+    <div className="px-2 pb-2.5 pl-[38px] pr-3">
+      {description && <p className="text-[11px] leading-snug text-muted">{description}</p>}
+      <DetailScale scale={scale} />
+      {onOpacity && (
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-[10px] text-muted">Opacity</span>
+          <input
+            type="range"
+            min="10"
+            max="100"
+            value={Math.round(opacity * 100)}
+            onChange={(e) => onOpacity(Number(e.target.value) / 100)}
+            className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-[var(--cb-track)]"
+            style={{ accentColor: color }}
+          />
+          <span className="w-7 shrink-0 text-right font-mono text-[10px] text-muted tabular-nums">
+            {Math.round(opacity * 100)}%
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// A generic row for vector, terrain and analysis layers.
+function LayerRow ({ layer, visible, onToggle, onZoom, count, scale, opacity, onOpacity, unavailable, temporal }) {
+  const [open, setOpen] = useState(false)
+  const disabled = Boolean(unavailable)
+  const active = visible && !disabled
+
+  const mark = scale?.kind === 'steps'
+    ? <RampChip colors={scale.colors} />
+    : <LayerSwatch color={layer.color} render={layer.legend?.render} />
+
+  const description = layer.legend?.description
+  const hasDetail = !disabled && Boolean(description || scale || onOpacity)
 
   return (
-    <li className="border-b border-border last:border-b-0">
-      <div className="flex items-center gap-2.5 px-3 py-2.5">
-        <Toggle checked={visible} onChange={onToggle} color={layer.color} label={`Show ${layer.label}`} />
+    <li className="border-b border-border/60 last:border-b-0">
+      <div className={`flex h-9 items-center gap-1.5 px-2 ${disabled ? 'opacity-55' : ''}`}>
+        {hasDetail ? (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-label={open ? 'Hide details' : 'Show details'}
+            aria-expanded={open}
+            className="grid h-5 w-4 shrink-0 place-items-center text-muted transition-colors hover:text-text"
+          >
+            <TbChevronRight className={`text-[12px] transition-transform duration-200 ${open ? 'rotate-90' : ''}`} aria-hidden />
+          </button>
+        ) : (
+          <span className="w-4 shrink-0" />
+        )}
 
-        <span className={`min-w-0 flex-1 truncate text-[13px] font-medium ${visible ? 'text-text' : 'text-text-2'}`}>
+        <MarkWithBadge mark={mark} temporal={temporal} />
+
+        <button
+          type="button"
+          onClick={hasDetail ? () => setOpen((v) => !v) : undefined}
+          title={description || layer.label}
+          className={`min-w-0 flex-1 truncate text-left text-[12.5px] font-medium ${active ? 'text-text' : 'text-text-2'} ${hasDetail ? 'cursor-pointer' : 'cursor-default'}`}
+        >
           {layer.label}
-        </span>
+        </button>
 
         {count != null && (
-          <span className="shrink-0 font-mono text-[10.5px] text-muted tabular-nums">{count}</span>
+          <span className="shrink-0 font-mono text-[10px] text-muted tabular-nums">{count}</span>
         )}
 
-        <IconButton
-          icon={TbAdjustmentsHorizontal}
-          label="Layer opacity"
-          size="sm"
-          tone="ghost"
-          active={tuning}
-          disabled={!visible}
-          onClick={() => setTuning((v) => !v)}
-        />
-      </div>
-
-      <div className="pb-2.5">
-        <LayerLegend layer={layer} scale={scale} />
-
-        {tuning && visible && (
-          <div className="mt-2 flex items-center gap-2 pl-[26px] pr-3">
-            <span className="text-[10.5px] text-muted">Opacity</span>
-            <input
-              type="range"
-              min="10"
-              max="100"
-              value={Math.round(opacity * 100)}
-              onChange={(e) => onOpacity(Number(e.target.value) / 100)}
-              className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-[var(--cb-track)]"
-              style={{ accentColor: layer.color }}
-            />
-            <span className="w-8 shrink-0 text-right font-mono text-[10.5px] text-muted tabular-nums">
-              {Math.round(opacity * 100)}%
-            </span>
-          </div>
+        {disabled ? (
+          <TbClockPause className="mr-1 shrink-0 text-[13px] text-muted" aria-hidden title={unavailable} />
+        ) : (
+          <>
+            {onZoom && (
+              <IconButton icon={TbViewfinder} label={`Zoom to ${layer.label}`} size="sm" tone="ghost" onClick={onZoom} />
+            )}
+            <Toggle checked={active} onChange={onToggle} color={layer.color} label={`Toggle ${layer.label}`} />
+          </>
         )}
       </div>
+
+      {open && hasDetail && (
+        <RowDetail description={description} scale={scale} opacity={opacity} onOpacity={onOpacity} color={layer.color} />
+      )}
+    </li>
+  )
+}
+
+// The colour mark, with a small clock riding its top-right corner when the layer
+// varies over time. A superscript badge rather than another control on the
+// right: it is a property of the layer, read alongside the name.
+function MarkWithBadge ({ mark, temporal }) {
+  return (
+    <span className="relative grid h-3.5 w-3.5 shrink-0 place-items-center">
+      {mark}
+      {temporal && (
+        <span
+          className="absolute -right-1.5 -top-1.5 grid h-[11px] w-[11px] place-items-center rounded-full bg-panel text-primary ring-1 ring-inset ring-[var(--cb-border-strong)]"
+          title="Time-varying layer, driven by the forecast timeline"
+        >
+          <TbClockHour4 className="text-[8px]" aria-hidden />
+        </span>
+      )}
+    </span>
+  )
+}
+
+// A themed level selector. A native select cannot be styled past its trigger,
+// the option list is drawn by the operating system, so this is a custom listbox.
+// The menu is portalled to the body and positioned from the trigger's rect, so
+// the scrolling layers panel cannot clip it, and it closes on an outside press,
+// a scroll or a resize.
+function LevelSelect ({ levels, value, onChange, label }) {
+  const [open, setOpen] = useState(false)
+  const [rect, setRect] = useState(null)
+  const btnRef = useRef(null)
+  const current = levels.find((l) => l.level === value) ?? levels[0]
+
+  useEffect(() => {
+    if (!open) return
+    setRect(btnRef.current?.getBoundingClientRect() ?? null)
+    const close = () => setOpen(false)
+    const onDoc = (e) => {
+      if (btnRef.current?.contains(e.target)) return
+      if (e.target.closest?.('[data-level-menu]')) return
+      setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDoc)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('pointerdown', onDoc)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
+  const WIDTH = 116
+
+  return (
+    <div className="shrink-0">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={label}
+        className={`flex items-center gap-1 rounded-cb-sm border py-0.5 pl-2 pr-1 text-[10.5px] font-semibold transition-colors ${
+          open
+            ? 'border-primary bg-primary-soft text-primary'
+            : 'border-border bg-panel-2 text-text-2 hover:border-border-strong hover:text-text'
+        }`}
+      >
+        <span className="tabular-nums">{current.levelLabel}</span>
+        <TbChevronDown className={`text-[11px] transition-transform duration-200 ${open ? 'rotate-180' : ''}`} aria-hidden />
+      </button>
+
+      {open && rect && createPortal(
+        <ul
+          data-level-menu
+          role="listbox"
+          aria-label={label}
+          style={{
+            position: 'fixed',
+            top: rect.bottom + 4,
+            left: Math.max(8, rect.right - WIDTH),
+            width: WIDTH,
+            boxShadow: '0 8px 24px rgba(16,24,40,0.16)'
+          }}
+          className="z-[60] overflow-hidden rounded-cb-sm border border-border bg-panel py-1"
+        >
+          {levels.map((l) => {
+            const active = l.level === value
+            return (
+              <li key={l.level} role="option" aria-selected={active}>
+                <button
+                  type="button"
+                  onClick={() => { onChange(l.level); setOpen(false) }}
+                  className={`flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[11px] transition-colors ${
+                    active ? 'bg-primary-soft font-semibold text-primary' : 'text-text-2 hover:bg-panel-2 hover:text-text'
+                  }`}
+                >
+                  <span className="tabular-nums">{l.levelLabel}</span>
+                  {active && <TbCheck className="text-[11px]" aria-hidden />}
+                </button>
+              </li>
+            )
+          })}
+        </ul>,
+        document.body
+      )}
+    </div>
+  )
+}
+
+// A forecast element row. One element of the active model, collapsing its levels
+// into a single row with a level selector when it has more than one.
+function ForecastRow ({ element, activeDef, levels, activeLevel, onLevel, visible, onToggle, scale, opacity, onOpacity, unavailable }) {
+  const [open, setOpen] = useState(false)
+  const disabled = Boolean(unavailable)
+  const active = visible && !disabled
+  const mark = scale?.kind === 'steps'
+    ? <RampChip colors={scale.colors} />
+    : <LayerSwatch color={activeDef.color} render="steps" />
+  const description = activeDef.legend?.description
+  const hasDetail = !disabled && Boolean(description || scale || onOpacity)
+
+  return (
+    <li className="border-b border-border/60 last:border-b-0">
+      <div className={`flex h-9 items-center gap-1.5 px-2 ${disabled ? 'opacity-55' : ''}`}>
+        {hasDetail ? (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-label={open ? 'Hide details' : 'Show details'}
+            aria-expanded={open}
+            className="grid h-5 w-4 shrink-0 place-items-center text-muted transition-colors hover:text-text"
+          >
+            <TbChevronRight className={`text-[12px] transition-transform duration-200 ${open ? 'rotate-90' : ''}`} aria-hidden />
+          </button>
+        ) : (
+          <span className="w-4 shrink-0" />
+        )}
+
+        <MarkWithBadge mark={mark} temporal />
+
+        <button
+          type="button"
+          onClick={hasDetail ? () => setOpen((v) => !v) : undefined}
+          title={description || element.label}
+          className={`min-w-0 flex-1 truncate text-left text-[12.5px] font-medium ${active ? 'text-text' : 'text-text-2'} ${hasDetail ? 'cursor-pointer' : 'cursor-default'}`}
+        >
+          {element.label}
+        </button>
+
+        {levels.length > 1 && (
+          <LevelSelect
+            levels={levels}
+            value={activeLevel}
+            onChange={onLevel}
+            label={`${element.label} level`}
+          />
+        )}
+
+        {disabled ? (
+          <TbClockPause className="mr-1 shrink-0 text-[13px] text-muted" aria-hidden title={unavailable} />
+        ) : (
+          <Toggle checked={active} onChange={onToggle} color={activeDef.color} label={`Toggle ${element.label}`} />
+        )}
+      </div>
+
+      {open && hasDetail && (
+        <RowDetail description={description} scale={scale} opacity={opacity} onOpacity={onOpacity} color={activeDef.color} />
+      )}
+    </li>
+  )
+}
+
+// One model, as a radio-like button in the selector. Filled when active, dimmed
+// and disabled until its cycle is ingested.
+function ModelChip ({ model, active, available, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={available ? () => onSelect(model.modelId) : undefined}
+      disabled={!available}
+      title={available ? model.modelFull : `${model.modelFull} (no cycle ingested yet)`}
+      aria-pressed={active}
+      className={`flex items-center justify-center gap-1 rounded-cb-sm border px-2 py-1 text-[10.5px] font-semibold transition-colors ${
+        active
+          ? 'border-primary bg-primary-soft text-primary'
+          : available
+            ? 'border-border bg-panel-2 text-text-2 hover:border-border-strong hover:text-text'
+            : 'cursor-not-allowed border-border bg-panel-2 text-muted opacity-55'
+      }`}
+    >
+      {!available && <TbClockPause className="text-[11px]" aria-hidden />}
+      <span className="truncate">{model.modelLabel}</span>
+    </button>
+  )
+}
+
+// A collapsible group. The header carries the section name, a count and a chevron
+// that turns the whole group off screen without losing its state.
+function Section ({ label, count, children, defaultOpen = true, right }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <li>
+      <div className="sticky top-0 z-10 flex items-center gap-1.5 border-b border-border bg-panel-2 px-2 py-1">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-1 text-left text-muted transition-colors hover:text-text"
+        >
+          <TbChevronDown className={`shrink-0 text-[12px] transition-transform duration-200 ${open ? '' : '-rotate-90'}`} aria-hidden />
+          <span className="text-[9.5px] font-semibold uppercase tracking-[0.08em]">{label}</span>
+        </button>
+        {right}
+        {count != null && <span className="shrink-0 font-mono text-[9.5px] text-muted tabular-nums">{count}</span>}
+      </div>
+      {open && <ul>{children}</ul>}
     </li>
   )
 }
 
 export default function LayersPanel ({
   layers,
+  rasterLayers = [],
+  availability = {},
   visibleLayers,
   onToggleLayer,
+  onZoomToLayer,
   onShowAll,
   onHideAll,
   counts = {},
   scales = {},
   opacities = {},
   onOpacity,
+  activeModelId,
+  onSelectModel,
+  levelChoice = {},
+  onSelectLevel,
   collapsed,
   onCollapse
 }) {
-  const visibleCount = layers.filter((l) => visibleLayers.has(l.id)).length
-  const allVisible = layers.length > 0 && visibleCount === layers.length
+  // Split the raster layers into their behavioural groups.
+  const pmdLayers = rasterLayers.filter((l) => l.source === 'pmd')
+  const analysisLayers = rasterLayers.filter((l) => l.bandDriven || l.source === 'computed')
+  const terrainLayers = rasterLayers.filter(
+    (l) => l.source !== 'pmd' && !l.bandDriven && l.source !== 'computed'
+  )
+
+  const toggleable = [...layers, ...rasterLayers.filter((l) => availability[l.id]?.ok)]
+  const visibleCount = toggleable.filter((l) => visibleLayers.has(l.id)).length
+  const allVisible = toggleable.length > 0 && visibleCount === toggleable.length
+
+  // Models, in contract order, each with whether it has any available layer.
+  const models = []
+  const seen = new Set()
+  for (const l of pmdLayers) {
+    if (seen.has(l.modelId)) continue
+    seen.add(l.modelId)
+    models.push({ modelId: l.modelId, modelLabel: l.modelLabel, modelFull: l.modelFull, model: l.model })
+  }
+  const modelAvailable = (modelId) => pmdLayers.some((l) => l.modelId === modelId && availability[l.id]?.ok)
+
+  // The active model's fields, grouped by element, each sorted by level.
+  const activeModelLayers = pmdLayers.filter((l) => l.modelId === activeModelId)
+  const elementOrder = []
+  const byElement = new Map()
+  for (const l of activeModelLayers) {
+    if (!byElement.has(l.element)) { byElement.set(l.element, []); elementOrder.push(l.element) }
+    byElement.get(l.element).push(l)
+  }
+  // Surface first, then by altitude: a lower pressure is higher up, so 700 hPa
+  // comes before 500 hPa. Level 0 is the surface and always leads.
+  for (const list of byElement.values()) {
+    list.sort((a, b) => (a.level === 0 ? -1 : b.level === 0 ? 1 : b.level - a.level))
+  }
+
+  const genericRow = (layer, withOpacity, temporal) => {
+    const state = availability[layer.id]
+    return (
+      <LayerRow
+        key={layer.id}
+        layer={layer}
+        visible={visibleLayers.has(layer.id)}
+        onToggle={() => onToggleLayer(layer.id)}
+        onZoom={onZoomToLayer ? () => onZoomToLayer(layer.id) : undefined}
+        count={counts[layer.id]}
+        scale={scales[layer.id]}
+        opacity={opacities[layer.id] ?? layer.opacity ?? 1}
+        onOpacity={withOpacity ? (v) => onOpacity(layer.id, v) : undefined}
+        unavailable={state && !state.ok ? state.reason : null}
+        temporal={temporal}
+      />
+    )
+  }
+
+  const empty = layers.length === 0 && rasterLayers.length === 0
 
   return (
     <Panel
@@ -104,11 +501,8 @@ export default function LayersPanel ({
       icon={TbStack2}
       collapsed={collapsed}
       onToggle={onCollapse}
-      className="max-h-[calc(100vh-8.5rem)] w-[310px]"
+      className="max-h-[calc(100vh-8.5rem)] w-[288px]"
       actions={
-        // One button that carries its own state, not two that sit side by side
-        // arguing. The icon shows what the map is now; pressing it does the
-        // other thing.
         <IconButton
           icon={allVisible ? TbEye : TbEyeOff}
           label={allVisible ? 'Hide all layers' : 'Show all layers'}
@@ -118,31 +512,80 @@ export default function LayersPanel ({
         />
       }
       footer={
-        <div className="flex items-center justify-between text-[11px] text-muted">
-          <span>{visibleCount} of {layers.length} visible</span>
+        <div className="flex items-center justify-between text-[10.5px] text-muted">
+          <span>{visibleCount} of {toggleable.length} visible</span>
           <span className="font-mono">EPSG:4326</span>
         </div>
       }
     >
-      {layers.length === 0 ? (
+      {empty ? (
         <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
           <TbLayersOff className="text-2xl text-muted" aria-hidden />
           <p className="text-[12px] text-muted">No layers are published yet.</p>
         </div>
       ) : (
         <ul>
-          {layers.map((layer) => (
-            <LayerRow
-              key={layer.id}
-              layer={layer}
-              visible={visibleLayers.has(layer.id)}
-              onToggle={() => onToggleLayer(layer.id)}
-              count={counts[layer.id]}
-              scale={scales[layer.id]}
-              opacity={opacities[layer.id] ?? 1}
-              onOpacity={(v) => onOpacity(layer.id, v)}
-            />
-          ))}
+          {layers.length > 0 && (
+            <Section label="Boundaries" count={layers.length}>
+              {layers.map((l) => genericRow(l, false, false))}
+            </Section>
+          )}
+
+          {terrainLayers.length > 0 && (
+            <Section label="Terrain" count={terrainLayers.length}>
+              {terrainLayers.map((l) => genericRow(l, true, false))}
+            </Section>
+          )}
+
+          {analysisLayers.length > 0 && (
+            <Section label="Analysis" count={analysisLayers.length} defaultOpen={false}>
+              {analysisLayers.map((l) => genericRow(l, true, Boolean(l.temporal)))}
+            </Section>
+          )}
+
+          {models.length > 0 && (
+            <Section label="Forecast models" count={elementOrder.length}>
+              <li className="border-b border-border/60 px-2 py-2">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {models.map((m) => (
+                    <ModelChip
+                      key={m.modelId}
+                      model={m}
+                      active={m.modelId === activeModelId}
+                      available={modelAvailable(m.modelId)}
+                      onSelect={onSelectModel}
+                    />
+                  ))}
+                </div>
+              </li>
+
+              {elementOrder.map((el) => {
+                const variants = byElement.get(el)
+                const key = `${activeModelId}:${el}`
+                const chosen = levelChoice[key]
+                const activeDef = variants.find((v) => v.level === chosen)
+                  ?? variants.find((v) => v.level === 0)
+                  ?? variants[0]
+                const state = availability[activeDef.id]
+                return (
+                  <ForecastRow
+                    key={key}
+                    element={activeDef}
+                    activeDef={activeDef}
+                    levels={variants}
+                    activeLevel={activeDef.level}
+                    onLevel={(lv) => onSelectLevel(activeModelId, el, lv)}
+                    visible={visibleLayers.has(activeDef.id)}
+                    onToggle={() => onToggleLayer(activeDef.id)}
+                    scale={scales[activeDef.id]}
+                    opacity={opacities[activeDef.id] ?? activeDef.opacity ?? 1}
+                    onOpacity={(v) => onOpacity(activeDef.id, v)}
+                    unavailable={state && !state.ok ? state.reason : null}
+                  />
+                )
+              })}
+            </Section>
+          )}
         </ul>
       )}
     </Panel>

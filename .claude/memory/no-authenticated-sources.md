@@ -16,13 +16,32 @@ prevent.
 **Scope: this is about data.** Every value the models read, every raster, every boundary. It is not a
 ban on the basemap the map draws underneath them.
 
-**The one credential in the project, added 2026-08-06 at the owner's request:** `VITE_MAPBOX_TOKEN`,
-for the satellite, outdoors, streets, light and dark basemaps. It is admissible because it is not a
-data credential: it is a public client token that reaches the browser by design, is restricted by URL
-in the Mapbox account, and no model input passes through it. Blank is a supported state, and the
-portal falls back to an open basemap and says so rather than breaking. Never put it in
-`runtime-config.js` in a repository, and never reuse this exception to justify an authenticated
-*data* source.
+**Two admitted credentials, both at the owner's explicit request. Do not add a third without the
+same sign off, and do not cite these to justify one.**
+
+1. **`VITE_MAPBOX_TOKEN`** (2026-08-06). Not a data credential: a public client basemap token that
+   reaches the browser by design, restricted by URL in the Mapbox account, no model input through it.
+   Blank is supported; the portal falls back to an open basemap and says so.
+
+2. **`PMD_USER` / `PMD_PASS`** (2026-08-10). This one **is** a data credential and a real reversal of
+   the rule above, so it is documented as an exception rather than pretended otherwise. The owner is
+   authorised to use PMD's own early warning portal (`PMD_BASE`, `https://115.186.56.181:12304`), a
+   third-party CME/EWS platform (Vue front end, FastAPI back end) that serves the ECMWF, WRF and CFS
+   forecast fields the CARI models need, which no anonymous source carries for Pakistan at these
+   levels. Mechanics that were reverse engineered from its bundle and confirmed live:
+   - `POST /user/login {username,password}` sets an **HttpOnly `ews_jwt` cookie** (SameSite=Strict,
+     ~30 day expiry). The JSON token it also returns is a decoy: the API authenticates on the cookie,
+     not a bearer header, so header auth returns 401 "invalid jwt string".
+   - `GET /api/getModelForecastLatest?data_type=ECMWF&element=CAPE` lists times and each one's
+     `file_path`. `GET /static/.../*.tif` returns an EPSG:4326 GeoTIFF (confirmed: CAPE, 720x560,
+     0.125 deg, 60-150E / 60N to -10S, 61 steps to +10 days, values 0-5465 J/kg).
+   - Self-signed cert: disable TLS verification for this host only.
+   - Server side only, `.env` only, never to the browser; cookie and password go on every logger's
+     redaction list.
+
+   Still open when this was written: the exact `element`/level codes for the pressure-level fields
+   (only CAPE confirmed returning data), and the `data_type` strings for WRF and CFS. See
+   [[data-source-status]].
 
 **How to apply:**
 

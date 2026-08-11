@@ -48,8 +48,25 @@ class Settings(BaseSettings):
     upstream_pmd_radar_base: str = ""
     upstream_pmd_press_base: str = ""
 
+    # PMD forecast portal, the one authenticated data source.
+    #
+    # A deliberate, owner-authorised exception to the otherwise absolute
+    # anonymous-source rule (see .claude/guardrails/security.md). Server side
+    # only: these never reach the browser. Blank means the PMD ingest is
+    # unavailable and nothing else changes. The portal uses a self-signed
+    # certificate, so pmd_verify_tls defaults false and applies to this host
+    # alone; never reuse it to relax verification on an anonymous upstream.
+    pmd_base: str = ""
+    pmd_user: str = ""
+    pmd_pass: str = ""
+    pmd_verify_tls: bool = False
+
     upstream_user_agent: str = "Mozilla/5.0 (compatible; CloudBurstDev/1.0)"
     upstream_timeout_s: int = 30
+
+    @property
+    def pmd_configured(self) -> bool:
+        return bool(self.pmd_base and self.pmd_user and self.pmd_pass)
 
     # Pakistan bounding box, used to clip at the source. A global GFS file is
     # around 500 MB, clipped to this it is a few megabytes.

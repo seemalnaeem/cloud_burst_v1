@@ -212,12 +212,20 @@ COMMENT ON TABLE geo.district_alias IS
   'Hand reviewed district name reconciliation. Every row states why it exists.';
 
 -- ------------------------------------------------------------ historic events
+--
+-- Two tables. obs.events is the tabular record, one row per recorded cloudburst,
+-- carrying the coordinates and the observed physical values from the source CSV.
+-- obs.event_photos holds the images for those events as bytes, so the whole
+-- dataset lives in the database and the local image folders never have to ship.
+-- district_name is filled at ingest by a spatial overlay against geo.districts,
+-- not carried in the CSV, so the point already knows the district it fell in.
 CREATE TABLE obs.events (
   id                    bigserial PRIMARY KEY,
   sr_no                 integer,
   location_name         text NOT NULL,
   occurrence            text,
   occurred_on           date,
+  district_name         text,
   rainfall_mm           double precision,
   cape_j_kg             double precision,
   relative_humidity_pct double precision,
@@ -233,6 +241,24 @@ CREATE TABLE obs.events (
 );
 CREATE INDEX events_geom_gix ON obs.events USING GIST (geom);
 CREATE INDEX events_loc_ix   ON obs.events (location_name);
+
+-- One row per image. seq orders the images within an event, so the carousel and
+-- the modal both play them in a stable order. The bytes live here rather than on
+-- disk so the data is self-contained in the database volume.
+CREATE TABLE obs.event_photos (
+  id          bigserial PRIMARY KEY,
+  event_id    bigint NOT NULL REFERENCES obs.events(id) ON DELETE CASCADE,
+  seq         integer NOT NULL,
+  filename    text NOT NULL,
+  mime        text NOT NULL DEFAULT 'image/png',
+  width       integer,
+  height      integer,
+  byte_size   integer NOT NULL,
+  image       bytea NOT NULL,
+  ingested_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (event_id, seq)
+);
+CREATE INDEX event_photos_event_ix ON obs.event_photos (event_id, seq);
 
 -- ---------------------------------------------------------------- forecast
 -- A cycle is identified by (model, creation_time), not creation_time alone:

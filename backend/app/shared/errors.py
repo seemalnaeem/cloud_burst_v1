@@ -56,6 +56,14 @@ class DistrictNotFound(AppError):
         )
 
 
+class EventNotFound(AppError):
+    code = "EVENT_NOT_FOUND"
+    status = 404
+
+    def __init__(self, event_id: int, what: str = "event") -> None:
+        super().__init__(f"No {what} with id {event_id}.", detail={"id": event_id})
+
+
 class LeadUnavailable(AppError):
     code = "LEAD_UNAVAILABLE"
     status = 404

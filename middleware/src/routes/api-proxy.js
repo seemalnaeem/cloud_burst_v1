@@ -18,7 +18,10 @@ const CACHE_RULES = [
   { prefix: '/meta', value: config.cacheControl.scores },
   { prefix: '/score', value: config.cacheControl.scores },
   { prefix: '/alerts', value: config.cacheControl.alerts },
-  { prefix: '/districts', value: config.cacheControl.scores }
+  { prefix: '/districts', value: config.cacheControl.scores },
+  // Event records and their images are static once ingested, so they cache like
+  // scores. The images also carry their own immutable Cache-Control from FastAPI.
+  { prefix: '/events', value: config.cacheControl.scores }
 ]
 
 const cacheControlFor = (path) =>

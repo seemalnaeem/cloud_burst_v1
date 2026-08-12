@@ -9,7 +9,7 @@
 // and the legend swatch all read it, which is what stops a legend from quietly
 // disagreeing with the map it describes.
 
-import { rasterTileUrl, vectorTileUrl } from './api.js'
+import { eventsGeoJsonUrl, rasterTileUrl, vectorTileUrl } from './api.js'
 
 // Pakistan, generously. Used for the initial view and for the reset control.
 export const DEFAULT_BOUNDS = [
@@ -24,35 +24,120 @@ export const sourceId = (layerId) => `src-${layerId}`
 export const fillId = (layerId) => `${layerId}-fill`
 export const lineId = (layerId) => `${layerId}-line`
 export const circleId = (layerId) => `${layerId}-circle`
+// A second line per polygon layer, drawn on top of every layer, that shows only
+// the selected feature. It exists because a thin selection outline on the normal
+// line layer gets painted over by neighbouring features along shared edges, so it
+// only appears on some borders. Lifting the selected outline into its own top
+// layer lets it stay thin and still read all the way round.
+export const selLineId = (layerId) => `${layerId}-sel`
 
 /** Every map layer id a contract layer owns, for visibility and hit testing. */
 export function layerIdsFor (def) {
   return def.geometryType === 'point'
     ? [circleId(def.id)]
-    : [fillId(def.id), lineId(def.id)]
+    : [fillId(def.id), lineId(def.id), selLineId(def.id)]
 }
 
-// The fill opacity for a polygon layer, as a feature-state expression.
-//
-// A selected polygon takes only a very light tint: the selection is meant to be
-// read from its bold outline, not from a heavy fill, so the shape underneath
-// stays legible. Hover is a slightly stronger wash. Shared by addVectorLayer and
-// resetPaint, so leaving the Analysis choropleth (which overwrites fill-opacity
-// with a flat number) restores the same interactive behaviour rather than a dead
-// constant that no longer responds to hover or selection.
+// Selection is drawn in one fixed red for every layer, a red that is not any
+// layer's own hue, so a picked polygon reads the same whether it is a boundary in
+// the Map view or a choropleth cell in Analysis. The fill is a semi opaque wash of
+// it and the outline is a thin full opacity line of it, drawn on its own top
+// layer so it is never painted over: colour carries the selection, not weight.
+const SELECT_COLOR = '#e11d1d'
+const SELECT_OUTLINE_WIDTH = 2.2  // thin, but always on top so always visible
+const SELECT_FILL_MAP = 0.32      // over the light Map view fill
+const SELECT_FILL_ANALYSIS = 0.72 // matches the choropleth density in Analysis
+
+// The fill colour for a polygon: the layer's own colour, turning to the selection
+// maroon when the feature is selected. Shared with resetPaint so leaving the
+// Analysis choropleth restores the selectable behaviour rather than a flat colour.
+function fillColorExpr (baseColor) {
+  return [
+    'case',
+    ['boolean', ['feature-state', 'selected'], false], SELECT_COLOR,
+    baseColor
+  ]
+}
+
+// The fill opacity for a polygon layer, as a feature-state expression. A selected
+// polygon takes a readable maroon wash; hover is a lighter tint of the layer's
+// own colour. Shared by addVectorLayer and resetPaint so a return from the
+// choropleth restores the same interactive behaviour rather than a dead constant.
 function fillOpacityExpr (base) {
   return [
     'case',
-    ['boolean', ['feature-state', 'selected'], false], Math.min(0.9, base + 0.1),
+    ['boolean', ['feature-state', 'selected'], false], SELECT_FILL_MAP,
     ['boolean', ['feature-state', 'hover'], false], Math.min(0.85, base + 0.28),
     base
   ]
 }
 
+
 /** Add a vector layer from its contract definition. */
 export function addVectorLayer (map, def, visible) {
   const src = sourceId(def.id)
+  const paint = def.paint ?? {}
 
+  // Points are served as GeoJSON, not vector tiles, by deliberate exception. The
+  // events layer is a couple of dozen features, so a GeoJSON source holds them
+  // all client side and draws them at every zoom with no tiling at all. That
+  // sidesteps the overzoom that silently drops a vector-tile point layer at some
+  // zooms. Polygons stay on tiles, where their vertex counts make tiling
+  // essential. The endpoint sets each feature's id, so feature-state (hover and
+  // selection) works exactly as it does for the tiled layers.
+  if (def.geometryType === 'point') {
+    if (!map.getSource(src)) {
+      map.addSource(src, { type: 'geojson', data: eventsGeoJsonUrl() })
+    }
+    if (!map.getLayer(circleId(def.id))) {
+      const baseR = paint.circleRadius ?? 6
+      const baseStroke = paint.circleStrokeWidth ?? 1.5
+      map.addLayer({
+        id: circleId(def.id),
+        type: 'circle',
+        source: src,
+        minzoom: def.minzoom ?? 0,
+        maxzoom: def.maxzoom ?? 22,
+        layout: { visibility: visible ? 'visible' : 'none' },
+        paint: {
+          // Radius is a pure zoom curve: the dots stay findable when zoomed out
+          // and do not turn into blobs when zoomed in. It deliberately carries no
+          // feature-state, because a single property may not combine a zoom curve
+          // with feature-state; doing so renders once and then drops the layer the
+          // moment the zoom changes. Hover and selection are shown on the ring and
+          // the opacity instead, which are feature-state only.
+          'circle-radius': [
+            'interpolate', ['linear'], ['zoom'],
+            4, baseR * 0.7,
+            10, baseR,
+            14, baseR * 1.5
+          ],
+          'circle-color': def.color,
+          // A white ring keeps every dot legible over a dark basemap and the
+          // terrain, and thickens to mark hover and selection.
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': [
+            'case',
+            ['boolean', ['feature-state', 'selected'], false], baseStroke + 2.2,
+            ['boolean', ['feature-state', 'hover'], false], baseStroke + 1,
+            baseStroke
+          ],
+          'circle-opacity': [
+            'case',
+            ['boolean', ['feature-state', 'selected'], false], 1,
+            ['boolean', ['feature-state', 'hover'], false], 1,
+            0.9
+          ],
+          'circle-stroke-opacity': 1
+        }
+      })
+    }
+    return
+  }
+
+  // Polygons and lines come from vector tiles. 14 is plenty because they
+  // overzoom cleanly, and it keeps the vertex heavy admin tiles from being
+  // refetched at every step.
   if (!map.getSource(src)) {
     map.addSource(src, {
       type: 'vector',
@@ -76,33 +161,6 @@ export function addVectorLayer (map, def, visible) {
     layout: { visibility: visible ? 'visible' : 'none' }
   }
 
-  const paint = def.paint ?? {}
-
-  if (def.geometryType === 'point') {
-    if (!map.getLayer(circleId(def.id))) {
-      map.addLayer({
-        id: circleId(def.id),
-        type: 'circle',
-        ...common,
-        paint: {
-          // Grow slightly with zoom so the dots stay findable when zoomed out
-          // and do not turn into blobs when zoomed in.
-          'circle-radius': [
-            'interpolate', ['linear'], ['zoom'],
-            4, (paint.circleRadius ?? 6) * 0.7,
-            10, paint.circleRadius ?? 6,
-            14, (paint.circleRadius ?? 6) * 1.5
-          ],
-          'circle-color': def.color,
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': paint.circleStrokeWidth ?? 1.5,
-          'circle-opacity': 0.95
-        }
-      })
-    }
-    return
-  }
-
   // Fill below line, so a boundary stays crisp over its own fill.
   if (!map.getLayer(fillId(def.id))) {
     map.addLayer({
@@ -110,10 +168,10 @@ export function addVectorLayer (map, def, visible) {
       type: 'fill',
       ...common,
       paint: {
-        'fill-color': def.color,
-        // Feature state lets hover and selection change opacity without
-        // re-rendering the source, which on the district layer is the difference
-        // between smooth and visibly stuttering.
+        // Own colour normally, maroon when selected. Feature state changes it
+        // without re-rendering the source, which on the districts is the
+        // difference between smooth and visibly stuttering.
+        'fill-color': fillColorExpr(def.color),
         'fill-opacity': fillOpacityExpr(paint.fillOpacity ?? 0.12)
       }
     })
@@ -126,26 +184,58 @@ export function addVectorLayer (map, def, visible) {
       ...common,
       layout: { ...common.layout, 'line-join': 'round', 'line-cap': 'round' },
       paint: {
+        // The layer's own boundary. Hover nudges it a touch; selection is not
+        // drawn here at all, because on this layer it is painted over by
+        // neighbouring features along shared edges. It is drawn on the top
+        // selection layer below instead.
         'line-color': def.color,
-        // A selected polygon reads from a noticeably heavier outline, so the
-        // fill can stay a light tint. Hover is a smaller nudge.
         'line-width': [
           'case',
-          ['boolean', ['feature-state', 'selected'], false],
-          (paint.lineWidth ?? 1) + 2.6,
           ['boolean', ['feature-state', 'hover'], false],
-          (paint.lineWidth ?? 1) + 0.8,
+          (paint.lineWidth ?? 1) + 0.5,
           paint.lineWidth ?? 1
         ],
-        'line-opacity': [
-          'case',
-          ['boolean', ['feature-state', 'selected'], false], 1,
-          0.95
-        ],
+        'line-opacity': 0.95,
         ...(paint.lineDasharray ? { 'line-dasharray': paint.lineDasharray } : {})
       }
     })
   }
+
+  // The selection outline, on its own layer so nothing paints over it. It shows
+  // only the selected feature (zero width and opacity otherwise) as a thin red
+  // line, and installLayers lifts it above every other layer once they are all
+  // added, so a picked polygon is outlined cleanly all the way round in both the
+  // Map and the Analysis view.
+  if (!map.getLayer(selLineId(def.id))) {
+    map.addLayer({
+      id: selLineId(def.id),
+      type: 'line',
+      ...common,
+      layout: { ...common.layout, 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': SELECT_COLOR,
+        'line-width': [
+          'case',
+          ['boolean', ['feature-state', 'selected'], false], SELECT_OUTLINE_WIDTH,
+          0
+        ],
+        'line-opacity': [
+          'case',
+          ['boolean', ['feature-state', 'selected'], false], 1,
+          0
+        ]
+      }
+    })
+  }
+}
+
+/** Lift every selection outline above all other layers, so nothing covers it. */
+export function raiseSelectionOutlines (map) {
+  const style = map.getStyle()
+  if (!style) return
+  style.layers
+    .filter((l) => l.id.endsWith('-sel'))
+    .forEach((l) => map.moveLayer(l.id))
 }
 
 export const rasterId = (layerId) => `raster-${layerId}`
@@ -279,18 +369,24 @@ export function paintByScore (map, layerId, scoresByKey, colorFor, keyField = 'd
 
   if (!entries.length) return
 
-  const expression = ['match', ['get', keyField]]
+  const match = ['match', ['get', keyField]]
   entries.forEach(([key, score]) => {
-    expression.push(key, colorFor(score))
+    match.push(key, colorFor(score))
   })
-  expression.push('rgba(148, 163, 184, 0.25)') // no data
+  match.push('rgba(148, 163, 184, 0.25)') // no data
 
-  map.setPaintProperty(id, 'fill-color', expression)
-  // The choropleth owns the fill, so selection cannot be a tint here; a selected
-  // feature reads slightly more solid instead, alongside its heavier outline.
+  // The choropleth colours the fill, but a selected cell overrides that with the
+  // same maroon used everywhere else, at the choropleth's own density, so it
+  // reads as a solid maroon patch under the thin maroon outline. Same selection
+  // look as the Map view, just over the scored fill instead of the plain one.
+  map.setPaintProperty(id, 'fill-color', [
+    'case',
+    ['boolean', ['feature-state', 'selected'], false], SELECT_COLOR,
+    match
+  ])
   map.setPaintProperty(id, 'fill-opacity', [
     'case',
-    ['boolean', ['feature-state', 'selected'], false], 0.92,
+    ['boolean', ['feature-state', 'selected'], false], SELECT_FILL_ANALYSIS,
     0.72
   ])
 }
@@ -299,9 +395,9 @@ export function paintByScore (map, layerId, scoresByKey, colorFor, keyField = 'd
 export function resetPaint (map, def) {
   const id = fillId(def.id)
   if (!map.getLayer(id)) return
-  map.setPaintProperty(id, 'fill-color', def.color)
-  // Restore the feature-state expression, not a flat number, so hover and
-  // selection keep tinting the fill after a return from the Analysis choropleth.
+  // Restore the feature-state expressions, not flat values, so hover and the
+  // maroon selection keep working after a return from the Analysis choropleth.
+  map.setPaintProperty(id, 'fill-color', fillColorExpr(def.color))
   map.setPaintProperty(id, 'fill-opacity', fillOpacityExpr(def.paint?.fillOpacity ?? 0.12))
 }
 

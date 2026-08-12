@@ -93,11 +93,11 @@ export default function Navbar ({ view, onView, isDark, onToggleTheme, status = 
           <TbCloudStorm className="text-[20px] text-cream" aria-hidden />
         </span>
         <div className="min-w-0 leading-tight">
-          <h1 className="truncate text-[15px] font-semibold tracking-tight text-cream">
+          <h1 className="truncate text-[15px] font-bold tracking-tight text-cream">
             Convective Activity Risk System
           </h1>
           <p className="hidden truncate text-[11px] sm:block" style={{ color: 'var(--cb-header-text)' }}>
-            Pakistan Meteorological Department
+            National Disaster Management Authority
           </p>
         </div>
       </div>

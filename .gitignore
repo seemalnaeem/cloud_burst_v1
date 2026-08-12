@@ -74,3 +74,9 @@ db/pgdata/
 # The numbers they carry live in the committed contracts and .md docs instead:
 # the CARI terrain and lowlands thresholds are in shared/contracts/cari.json.
 docs/*.docx
+
+# Historical event data: the source CSV and per-event image folders. Large and
+# delivered separately; ingested into the database (obs.events plus
+# obs.event_photos), so the database is the copy that matters. Reload with
+# scripts/ingest/ingest_events.py.
+docs/historical_data/

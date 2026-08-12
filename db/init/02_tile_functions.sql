@@ -153,17 +153,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE PARALLEL SAFE;
 
--- Points have no vertices to thin.
+-- Points have no vertices to thin. The fifth ST_AsMVT argument names the feature
+-- id column, so each point carries its own id in the tile; the map needs that to
+-- set the hover and selected feature-state that grows and rings a picked marker.
 CREATE OR REPLACE FUNCTION tiles.events(z integer, x integer, y integer)
 RETURNS bytea AS $$
 DECLARE bounds geometry; result bytea;
 BEGIN
   bounds := ST_TileEnvelope(z, x, y);
 
-  SELECT ST_AsMVT(c, 'events', 4096, 'geom') INTO result
+  SELECT ST_AsMVT(c, 'events', 4096, 'geom', 'id') INTO result
   FROM (
-    SELECT e.id, e.location_name, e.occurrence, e.rainfall_mm, e.cape_j_kg,
-           e.elevation_m, e.slope_deg,
+    SELECT e.id, e.location_name, e.occurrence, e.district_name,
+           e.rainfall_mm, e.cape_j_kg, e.elevation_m, e.slope_deg,
            ST_AsMVTGeom(ST_Transform(e.geom, 3857), bounds, 4096, 64, true) AS geom
     FROM obs.events e
     WHERE e.geom && ST_Transform(bounds, 4326)

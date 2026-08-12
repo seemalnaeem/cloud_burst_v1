@@ -136,6 +136,20 @@ export const getWindField = (model, creationTime, leadHours, signal) =>
 export const getRasterPoint = (layer, { model, creationTime, leadHours, lon, lat } = {}, signal) =>
   api.get('/api/raster/point', { layer, model, creation_time: creationTime, lead: leadHours, lon, lat }, { signal })
 
+// One historic event, with its physical values, the district it fell in and a
+// photo manifest. The map draws the point from tiles; this backs the detail card.
+export const getEvent = (id, signal) =>
+  api.get(`/api/events/${encodeURIComponent(id)}`, null, { signal })
+// The URL of one event image, by sequence. A plain URL, not a fetch, so it can go
+// straight into an <img src>; it moves with the host like every other request.
+export const eventPhotoUrl = (id, seq) =>
+  `${API_BASE}/api/events/${encodeURIComponent(id)}/photos/${seq}`
+// The events as a GeoJSON FeatureCollection, for a Mapbox geojson source. Points
+// are served this way rather than as vector tiles, by exception: the set is tiny
+// and a geojson source draws every marker at every zoom with no tiling. Each
+// feature carries its own id, so feature-state still works.
+export const eventsGeoJsonUrl = () => `${API_BASE}/api/events/geojson`
+
 export const getAlerts = (signal) => api.get('/api/alerts', null, { signal })
 export const getUpstreamStatus = (signal) => api.get('/api/upstream/status', null, { signal })
 

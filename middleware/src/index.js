@@ -25,7 +25,19 @@ app.set('trust proxy', true)
 // helmet defaults include COEP and a CSP tuned for HTML responses. This service
 // returns JSON and binary tiles to a separate origin, and those two headers
 // break the tile fetches without buying anything here.
-app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }))
+//
+// Cross-Origin-Resource-Policy is forced to cross-origin for the same reason.
+// The web tier is served on a different port, so it is a different origin, and
+// helmet's default of same-origin makes the browser silently refuse to embed
+// any resource from here. JSON and tiles survive it because they are fetched
+// with CORS, but a plain <img src> is a no-cors load: the event photos would be
+// blocked with no console error. Everything this gateway serves is already open
+// through CORS, so opening CORP to match is consistent, not a new exposure.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}))
 
 app.use(cors())
 app.use(compression())

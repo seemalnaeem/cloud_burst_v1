@@ -164,6 +164,34 @@ textarea {
   }
 }
 
+/* Indeterminate loading bar. A slim highlight sweeps across a track while a card
+   waits on a fetch or a score, so the wait reads as progress rather than a
+   frozen line of text. */
+@keyframes cb-indeterminate {
+  0% {
+    left: -42%;
+    width: 42%;
+  }
+  50% {
+    left: 34%;
+    width: 46%;
+  }
+  100% {
+    left: 100%;
+    width: 42%;
+  }
+}
+.cb-loadbar {
+  animation: cb-indeterminate 1.15s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-loadbar {
+    animation: none;
+    left: 0;
+    width: 100%;
+  }
+}
+
 /* Mapbox GL's own chrome, all of it suppressed. Navigation is replaced by our
    themed MapControls, and the scale bar, the attribution control and the
    wordmark are off at the project owner's request.

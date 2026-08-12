@@ -16,6 +16,7 @@ import { cariClasses } from '@/lib/contracts'
 import { fmtPercent } from '@/lib/format'
 
 import { Panel, IconButton } from './ui/Panel'
+import { LoadingBar } from './ui/Loading'
 
 const TEHSIL_LAYERS = new Set(['pak_tehsils'])
 
@@ -48,7 +49,7 @@ export default function CariCard ({ selection, leadHours, onClose }) {
 
   return (
     <Panel
-      title="Cloudburst risk (CARI)"
+      title="Convective activity risk (CARI)"
       icon={TbCloudStorm}
       accent={cari.data?.riskColor}
       className="max-h-[calc(100vh-7rem)] w-[300px]"
@@ -62,7 +63,7 @@ export default function CariCard ({ selection, leadHours, onClose }) {
 
 function Body ({ feature, cari }) {
   if (cari.isLoading || (!cari.data && !cari.isError)) {
-    return <p className="py-6 text-center text-[12px] text-muted">Scoring {feature.label}…</p>
+    return <LoadingBar label={`Scoring ${feature.label}…`} />
   }
 
   if (cari.isError) {

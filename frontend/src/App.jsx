@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { TbAlertTriangle, TbCloudStorm } from 'react-icons/tb'
 
 import CariCard from '@/components/CariCard'
+import EventCard from '@/components/EventCard'
 import FeaturePanel from '@/components/FeaturePanel'
 import LayersPanel from '@/components/LayersPanel'
 import MapControls from '@/components/MapControls'
@@ -24,7 +25,7 @@ import { useForecast } from '@/hooks/useForecast'
 import { useRasterAvailability } from '@/hooks/useRasterAvailability'
 import { useTheme } from '@/hooks/useTheme'
 import { getLayerExtent, getRasterPoint } from '@/lib/api'
-import { availableBasemaps, defaultBasemapId, hasMapboxToken } from '@/lib/basemaps'
+import { availableBasemaps, defaultBasemapId, findBasemap, hasMapboxToken } from '@/lib/basemaps'
 import { cariClasses, contracts, rasterScale } from '@/lib/contracts'
 import { DEFAULT_BOUNDS, fitToBounds, fitToExtent } from '@/lib/map'
 import { getStored, setStored } from '@/lib/storage'
@@ -69,7 +70,7 @@ export default function App () {
   const [visibleLayers, setVisibleLayers] = useState(new Set())
   const [opacities, setOpacities] = useState(() => getStored('opacities', {}))
   const [selection, setSelection] = useState(null)
-  const [basemap, setBasemap] = useState(null)
+  const [basemap, setBasemap] = useState(() => getStored('basemap', null))
   const [projection, setProjection] = useState('mercator')
   const [layersCollapsed, setLayersCollapsed] = useState(false)
   const [panelsOpen, setPanelsOpen] = useState(true)
@@ -259,6 +260,15 @@ export default function App () {
   useEffect(() => { setStored('opacities', opacities) }, [opacities])
   useEffect(() => { setStored('activeModelId', activeModelId) }, [activeModelId])
   useEffect(() => { setStored('levelChoice', levelChoice) }, [levelChoice])
+
+  // Persist the chosen basemap and restore it next visit. Once the contract is
+  // known, a stored id that no longer exists (a token removed, a renamed style)
+  // is dropped so it falls back to the theme default rather than a blank map.
+  useEffect(() => { setStored('basemap', basemap) }, [basemap])
+  useEffect(() => {
+    if (!ready || !basemap) return
+    if (!findBasemap(basemap)) setBasemap(null)
+  }, [ready, basemap])
 
   // Resolved during render, not in an effect. Setting it in an effect meant the
   // map mounted with one basemap for a frame and then called setStyle once
@@ -510,8 +520,13 @@ export default function App () {
               {/* Map view shows the attribute popup and the raster identify card;
                   Analysis view shows the CARI score for the clicked unit. One
                   card is up at a time and both live top right beside the controls. */}
+              {/* A clicked historic event point gets its own card, with the
+                  attribute readout and the photo carousel; every other layer
+                  falls through to the generic attribute inspector. */}
               {!analysis && selection && (
-                <FeaturePanel selection={selection} onClose={() => setSelection(null)} />
+                selection.layer?.id === 'historic_events'
+                  ? <EventCard selection={selection} onClose={() => setSelection(null)} />
+                  : <FeaturePanel selection={selection} onClose={() => setSelection(null)} />
               )}
               {!analysis && rasterSelection && (
                 <RasterPanel selection={rasterSelection} onClose={() => setRasterSelection(null)} />

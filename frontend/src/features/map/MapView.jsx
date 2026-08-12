@@ -22,8 +22,8 @@ import { getWindField } from '@/lib/api'
 import { mapboxToken, styleUrl } from '@/lib/basemaps'
 import {
   DEFAULT_CENTER, DEFAULT_ZOOM,
-  addRasterLayer, addVectorLayer, layerIdsFor, paintByScore, removeRasterLayer, resetPaint,
-  setLayerOpacity, setLayerVisible, setRasterOpacity, setRasterTime
+  addRasterLayer, addVectorLayer, layerIdsFor, paintByScore, raiseSelectionOutlines,
+  removeRasterLayer, resetPaint, setLayerOpacity, setLayerVisible, setRasterOpacity, setRasterTime
 } from '@/lib/map'
 import { removeWindBarbs, setWindBarbs } from '@/lib/windBarbs'
 
@@ -79,6 +79,11 @@ export default function MapView ({
       if (!visible.has(def.id)) return
       addRasterLayer(map, def, { opacity: op[def.id] ?? def.opacity, creationTime: ct, leadHours: lh })
     })
+
+    // Every polygon layer's selection outline goes to the very top now that all
+    // layers exist, so a selected boundary or choropleth cell is outlined above
+    // everything and never painted over by a neighbour.
+    raiseSelectionOutlines(map)
   }, [])
 
   // ------------------------------------------------------------- create once
@@ -233,7 +238,10 @@ export default function MapView ({
       }
 
       const def = clickable.find((l) => layerIdsFor(l).includes(feature.layer.id))
-      onSelectFeature?.({ layer: def, properties: feature.properties })
+      // feature.id carries the tile's own feature id, which for a points layer
+      // is the row id promoted out of the properties by ST_AsMVT. The events card
+      // scores by it, so pass it alongside the attributes.
+      onSelectFeature?.({ layer: def, properties: feature.properties, featureId: feature.id })
     }
 
     map.on('mousemove', onMove)

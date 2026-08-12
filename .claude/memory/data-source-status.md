@@ -18,7 +18,7 @@ Sources arrive incrementally; until confirmed, a route returns 501. All anonymou
 | DEM and slope | owner's `data/raster/pakistan_dem.tif`, no Copernicus needed | **loaded** 2026-08-10 |
 | National, provinces, districts, tehsils | owner's `data/vector/admin_final` | **loaded** 2026-08-06 |
 | IIOJK districts | inside the district layer, `province_code = 'IJK'` | **loaded**, 22 rows, no separate file needed |
-| Historical events (21 rows plus photos) | local CSV plus images | pending |
+| Historical events (21 rows plus photos) | local CSV plus images | **loaded** 2026-08-12, see below |
 | Rivers, glacial lakes | owner's local catalog | pending |
 | PMD radar, PMD advisories | unchanged, already anonymous | proxy designed, base URL blank |
 
@@ -90,6 +90,33 @@ Element codes are PMD's own: `RHU` not RH, `TEM`, `DPT`, `PWAT`, `TPE`, `HOURTPE
 `file_path`s, `model?...&suffix=tif|json` returns a single file, `modelTimeList` lists cycles. Tiffs
 are EPSG:4326 over a 60-150E Asia domain (clipped to Pakistan on ingest). Cycle time is UTC; the
 portal shows PKT.
+
+## Historic events, loaded 2026-08-12
+
+Two tables, one ingest. `obs.events` is the tabular record (21 rows, coordinates
+plus the observed physical values); `obs.event_photos` holds the images as bytea
+(22 photos), so the whole set lives in the database and the source folders never
+ship. `obs.events.district_name` is filled at ingest by a spatial overlay against
+`geo.districts` (containing polygon, nearest as fallback); the CSV does not carry
+it. All 21 points fell inside a district, 0 used the fallback.
+
+Source is `docs/historical_data` (gitignored): the CSV plus one numbered folder of
+PNGs per event, joined by the `Sr. no` prefix. That folder is not mounted, so the
+ingest is a copy-in then run:
+
+```
+docker cp docs/historical_data cbd-api:/tmp/historical_data
+docker exec cbd-api python3 /app/ingest/ingest_events.py --data-dir /tmp/historical_data
+```
+
+`scripts/ingest/ingest_events.py` is idempotent (truncates both tables, reloads).
+Migration `db/migrations/2026-08-12_event_photos.sql` adds the photo table and the
+district column; `tiles.events` now emits the row id as the MVT feature id so the
+map can hover and select a marker. API: `/api/events`, `/api/events/{id}` (record
+plus photo manifest), `/api/events/{id}/photos/{seq}` (image bytes). The frontend
+`EventCard` renders the attributes with a colour per value and an autoplaying
+carousel with a full resolution lightbox. The layer is `historic_events`, under
+the IIOJK toggle in the Boundaries section.
 
 ## Open decisions
 

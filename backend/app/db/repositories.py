@@ -412,3 +412,107 @@ async def alerts_for(target_date) -> list[dict[str, Any]]:
 async def integrity_report() -> list[dict[str, Any]]:
     rows = await pool.fetch("SELECT * FROM meta.check_integrity()")
     return [dict(r) for r in rows]
+
+
+# ----------------------------------------------------------------- historic events
+
+
+async def list_events() -> list[dict[str, Any]]:
+    """Every event, lightly: id, name, date and coordinates.
+
+    The map draws the points from vector tiles; this is for a caller that wants
+    the list without the tiles, and it stays small by leaving the images out.
+    """
+    rows = await pool.fetch(
+        """
+        SELECT id, sr_no, location_name, occurrence, district_name,
+               ST_Y(geom) AS latitude, ST_X(geom) AS longitude
+        FROM obs.events
+        ORDER BY sr_no NULLS LAST, id
+        """
+    )
+    return [dict(r) for r in rows]
+
+
+async def events_geojson() -> dict[str, Any]:
+    """Every event as a GeoJSON FeatureCollection, geometry from ST_AsGeoJSON.
+
+    Points are drawn from this rather than from vector tiles, by exception: the
+    set is tiny, so a client side geojson source renders every marker at every
+    zoom with no tiling. The feature id is set to the row id so Mapbox feature
+    state (hover, selection) works and the detail card can score by it.
+    """
+    row = await pool.fetchval(
+        """
+        SELECT json_build_object(
+          'type', 'FeatureCollection',
+          'features', COALESCE(json_agg(
+            json_build_object(
+              'type', 'Feature',
+              'id', id,
+              'geometry', ST_AsGeoJSON(geom)::json,
+              'properties', json_build_object(
+                'id', id,
+                'location_name', location_name,
+                'occurrence', occurrence,
+                'district_name', district_name,
+                'rainfall_mm', rainfall_mm,
+                'cape_j_kg', cape_j_kg,
+                'elevation_m', elevation_m,
+                'slope_deg', slope_deg
+              )
+            )
+          ), '[]'::json)
+        )::text
+        FROM obs.events
+        """
+    )
+    return json.loads(row)
+
+
+async def get_event(event_id: int) -> dict[str, Any] | None:
+    """One event with its physical values, coordinates and photo manifest.
+
+    The photos come back as metadata only, ordered by seq. The bytes are fetched
+    one at a time through event_photo, so opening the card is one small JSON read
+    and the images stream in as the carousel needs them.
+    """
+    row = await pool.fetchrow(
+        """
+        SELECT id, sr_no, location_name, occurrence, occurred_on, district_name,
+               rainfall_mm, cape_j_kg, relative_humidity_pct, precipitable_water_mm,
+               vertical_velocity, elevation_m, slope_deg,
+               ST_Y(geom) AS latitude, ST_X(geom) AS longitude
+        FROM obs.events
+        WHERE id = $1
+        """,
+        event_id,
+    )
+    if row is None:
+        return None
+    photos = await pool.fetch(
+        """
+        SELECT seq, filename, mime, width, height, byte_size
+        FROM obs.event_photos
+        WHERE event_id = $1
+        ORDER BY seq
+        """,
+        event_id,
+    )
+    out = dict(row)
+    out["photos"] = [dict(p) for p in photos]
+    return out
+
+
+async def event_photo(event_id: int, seq: int) -> dict[str, Any] | None:
+    """The bytes and content type of one image, for the image endpoint."""
+    row = await pool.fetchrow(
+        """
+        SELECT image, mime, byte_size
+        FROM obs.event_photos
+        WHERE event_id = $1 AND seq = $2
+        """,
+        event_id,
+        seq,
+    )
+    return dict(row) if row else None

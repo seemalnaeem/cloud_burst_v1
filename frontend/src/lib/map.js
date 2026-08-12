@@ -32,6 +32,23 @@ export function layerIdsFor (def) {
     : [fillId(def.id), lineId(def.id)]
 }
 
+// The fill opacity for a polygon layer, as a feature-state expression.
+//
+// A selected polygon takes only a very light tint: the selection is meant to be
+// read from its bold outline, not from a heavy fill, so the shape underneath
+// stays legible. Hover is a slightly stronger wash. Shared by addVectorLayer and
+// resetPaint, so leaving the Analysis choropleth (which overwrites fill-opacity
+// with a flat number) restores the same interactive behaviour rather than a dead
+// constant that no longer responds to hover or selection.
+function fillOpacityExpr (base) {
+  return [
+    'case',
+    ['boolean', ['feature-state', 'selected'], false], Math.min(0.9, base + 0.1),
+    ['boolean', ['feature-state', 'hover'], false], Math.min(0.85, base + 0.28),
+    base
+  ]
+}
+
 /** Add a vector layer from its contract definition. */
 export function addVectorLayer (map, def, visible) {
   const src = sourceId(def.id)
@@ -94,17 +111,10 @@ export function addVectorLayer (map, def, visible) {
       ...common,
       paint: {
         'fill-color': def.color,
-        // Feature state lets hover change opacity without re-rendering the
-        // source, which on the district layer is the difference between smooth
-        // and visibly stuttering.
-        'fill-opacity': [
-          'case',
-          ['boolean', ['feature-state', 'hover'], false],
-          Math.min(0.85, (paint.fillOpacity ?? 0.12) + 0.28),
-          ['boolean', ['feature-state', 'selected'], false],
-          Math.min(0.85, (paint.fillOpacity ?? 0.12) + 0.4),
-          paint.fillOpacity ?? 0.12
-        ]
+        // Feature state lets hover and selection change opacity without
+        // re-rendering the source, which on the district layer is the difference
+        // between smooth and visibly stuttering.
+        'fill-opacity': fillOpacityExpr(paint.fillOpacity ?? 0.12)
       }
     })
   }
@@ -117,15 +127,21 @@ export function addVectorLayer (map, def, visible) {
       layout: { ...common.layout, 'line-join': 'round', 'line-cap': 'round' },
       paint: {
         'line-color': def.color,
+        // A selected polygon reads from a noticeably heavier outline, so the
+        // fill can stay a light tint. Hover is a smaller nudge.
         'line-width': [
           'case',
           ['boolean', ['feature-state', 'selected'], false],
-          (paint.lineWidth ?? 1) + 1.6,
+          (paint.lineWidth ?? 1) + 2.6,
           ['boolean', ['feature-state', 'hover'], false],
           (paint.lineWidth ?? 1) + 0.8,
           paint.lineWidth ?? 1
         ],
-        'line-opacity': 0.95,
+        'line-opacity': [
+          'case',
+          ['boolean', ['feature-state', 'selected'], false], 1,
+          0.95
+        ],
         ...(paint.lineDasharray ? { 'line-dasharray': paint.lineDasharray } : {})
       }
     })
@@ -270,7 +286,13 @@ export function paintByScore (map, layerId, scoresByKey, colorFor, keyField = 'd
   expression.push('rgba(148, 163, 184, 0.25)') // no data
 
   map.setPaintProperty(id, 'fill-color', expression)
-  map.setPaintProperty(id, 'fill-opacity', 0.75)
+  // The choropleth owns the fill, so selection cannot be a tint here; a selected
+  // feature reads slightly more solid instead, alongside its heavier outline.
+  map.setPaintProperty(id, 'fill-opacity', [
+    'case',
+    ['boolean', ['feature-state', 'selected'], false], 0.92,
+    0.72
+  ])
 }
 
 /** Put a layer back on its own contract colour. */
@@ -278,7 +300,9 @@ export function resetPaint (map, def) {
   const id = fillId(def.id)
   if (!map.getLayer(id)) return
   map.setPaintProperty(id, 'fill-color', def.color)
-  map.setPaintProperty(id, 'fill-opacity', def.paint?.fillOpacity ?? 0.12)
+  // Restore the feature-state expression, not a flat number, so hover and
+  // selection keep tinting the fill after a return from the Analysis choropleth.
+  map.setPaintProperty(id, 'fill-opacity', fillOpacityExpr(def.paint?.fillOpacity ?? 0.12))
 }
 
 export function fitToBounds (map, bounds, padding = 48) {

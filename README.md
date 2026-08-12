@@ -1,4 +1,4 @@
-# Cloud Burst Dev
+# Convective Activity Risk System
 
 A cloudburst risk portal for Pakistan. Ingests weather forecast rasters and
 administrative boundaries, runs three scoring models over them, and renders the
@@ -83,15 +83,15 @@ variables at different thresholds, spread across a 3,600 line Python file and a
 6,000 line JavaScript file. The rain threshold ended up with three different
 values depending on where you looked, and the UI told users there were 7, 12 or
 13 conditions depending on which panel they opened. Section 12 of
-[DATA_SOURCES.md](DATA_SOURCES.md) catalogs the rest.
+[DATA_SOURCES.md](docs/DATA_SOURCES.md) catalogs the rest.
 
 ## Two source documents
 
-- [DATA_SOURCES.md](DATA_SOURCES.md) is the data catalog. Sources, processing,
+- [DATA_SOURCES.md](docs/DATA_SOURCES.md) is the data catalog. Sources, processing,
   thresholds, palettes, endpoints. Section 9 covers the scoring models, section
   12 lists every place the old code and its own comments disagreed. The code
   values are the correct ones and the contracts encode them.
-- [COLOR_SCHEMES.md](COLOR_SCHEMES.md) is the UI theme system, every `--cb-*`
+- [COLOR_SCHEMES.md](docs/COLOR_SCHEMES.md) is the UI theme system, every `--cb-*`
   token in light and dark.
 
 ## The three scoring models

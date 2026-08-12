@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Cloud Burst Dev portal. Vite, React, Tailwind 4, react-icons.",
+  "description": "Convective Activity Risk System portal. Vite, React, Tailwind 4, react-icons.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

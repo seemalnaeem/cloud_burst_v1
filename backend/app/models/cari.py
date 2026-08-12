@@ -62,7 +62,12 @@ def terrain_class(province: str | None, district: str | None) -> str:
         return "terrain"
 
     if p.startswith("punjab"):
-        return "terrain" if district in sel["punjabTerrainDistricts"] else "lowlands"
+        # Normalize both sides: the district layer spells these Title Case
+        # (Rawalpindi) but the tehsil layer files the parent district upper case
+        # (RAWALPINDI), and a raw comparison would send every Potohar tehsil to
+        # the lowlands matrix and score it on the wrong thresholds.
+        terrain_districts = {_normalize(d) for d in sel["punjabTerrainDistricts"]}
+        return "terrain" if _normalize(district) in terrain_districts else "lowlands"
 
     return sel["default"]
 
@@ -175,14 +180,12 @@ def reducers() -> dict[str, str]:
     return {v["key"]: v["reducer"] for v in _C["variables"]}
 
 
-def primary_source_model() -> str | None:
-    """The model most CARI variables are read from, the headline forecast cycle.
+def source_priority() -> list[str]:
+    """The order the resolver prefers models in when a variable is sourced 'auto'.
 
-    Derived from the source map rather than hardcoded: it is the PMD model that
-    carries the full surface and pressure input set. Wind and vertical velocity
-    come from GFS and elevation and slope are static, so those are the minority.
+    A variable graded against a band is read from the first model here that
+    catalogues that band. Wind and vertical velocity exist only under GFS so they
+    fall through to it; precipitable water only under GRAPES so it falls to the
+    backstop; everything else resolves to the model at the top of the list.
     """
-    from collections import Counter
-
-    models = [v.get("sourceModel") for v in _C["variables"] if v.get("sourceModel")]
-    return Counter(models).most_common(1)[0][0] if models else None
+    return list(_C.get("sourcePriority") or [])

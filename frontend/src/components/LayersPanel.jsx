@@ -465,6 +465,45 @@ function ForecastRow ({ element, activeDef, levels, activeLevel, onLevel, visibl
   )
 }
 
+// A CARI layer row for the Analysis view. Unlike a boundary row, its colour is
+// not one swatch but a class ramp, so the legend that explains the choropleth
+// sits under the name where it is read alongside it, always visible rather than
+// tucked behind a chevron. A quiet "scoring" note rides the row while the layer
+// is still being computed.
+function CariLayerRow ({ layer, visible, onToggle, classes, status }) {
+  return (
+    <li className="border-b border-border/60 last:border-b-0">
+      <div className="flex h-9 items-center gap-1.5 px-2">
+        <span className="w-4 shrink-0" />
+        <span className="grid h-3.5 w-3.5 shrink-0 place-items-center">
+          <LayerSwatch color={layer.color} />
+        </span>
+        <span className={`min-w-0 flex-1 truncate text-[12.5px] font-medium ${visible ? 'text-text' : 'text-text-2'}`}>
+          {layer.label}
+        </span>
+        {visible && status === 'computing' && (
+          <span className="shrink-0 animate-pulse text-[9.5px] font-medium text-muted">scoring…</span>
+        )}
+        <Toggle checked={visible} onChange={onToggle} color={layer.color} label={`Toggle ${layer.label}`} />
+      </div>
+
+      {classes.length > 0 && (
+        <ul className="flex flex-col gap-0.5 px-2 pb-2 pl-[32px] pr-3">
+          {classes.map((c) => (
+            <li key={c.idx ?? c.name} className="flex items-center gap-1.5 text-[10px] text-text-2">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+                style={{ background: c.color, border: '1px solid rgba(16,24,40,0.14)' }}
+              />
+              <span className="truncate">{c.name}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
 // A collapsible group. The header carries the section name, a count and a chevron
 // that turns the whole group off screen without losing its state.
 function Section ({ label, count, children, defaultOpen = true, right }) {
@@ -507,8 +546,49 @@ export default function LayersPanel ({
   levelChoice = {},
   onSelectLevel,
   collapsed,
-  onCollapse
+  onCollapse,
+  cariMode = false,
+  cariLayers = [],
+  cariClasses = [],
+  cariStatus = {}
 }) {
+  // Analysis view: the panel is a short list of CARI layers, each carrying the
+  // class legend that reads its choropleth. Everything else, the boundary,
+  // terrain and forecast sections, belongs to the Map view and is set aside.
+  if (cariMode) {
+    const visibleCount = cariLayers.filter((l) => visibleLayers.has(l.id)).length
+    return (
+      <Panel
+        title="CARI Layers"
+        icon={TbStack2}
+        collapsed={collapsed}
+        onToggle={onCollapse}
+        className="max-h-[calc(100vh-8.5rem)] w-[288px]"
+        footer={
+          <div className="flex items-center justify-between text-[10.5px] text-muted">
+            <span>{visibleCount} of {cariLayers.length} visible</span>
+            <span className="font-mono">Convective Activity Risk</span>
+          </div>
+        }
+      >
+        <ul>
+          <Section label="Administrative units" count={cariLayers.length}>
+            {cariLayers.map((l) => (
+              <CariLayerRow
+                key={l.id}
+                layer={l}
+                visible={visibleLayers.has(l.id)}
+                onToggle={() => onToggleLayer(l.id)}
+                classes={cariClasses}
+                status={cariStatus[l.id]}
+              />
+            ))}
+          </Section>
+        </ul>
+      </Panel>
+    )
+  }
+
   // Split the raster layers into their behavioural groups. A forecast layer is
   // any that names a model (PMD or GFS); those are grouped under the model
   // selector. The rest are terrain (static) or analysis (computed).

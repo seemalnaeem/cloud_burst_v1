@@ -34,8 +34,20 @@ export default function DistrictPanel ({ district, leadHours }) {
     )
   }
 
+  // Idle, the first frame before the fetch starts, is neither loading nor error
+  // yet carries no data. Treat it as scoring so nothing downstream dereferences
+  // a null result.
   const result = cari.data
+  if (!result) {
+    return <p className="px-2 py-3 text-sm text-muted">Scoring {district}…</p>
+  }
+
   const variables = contracts().cari.variables
+  // Variables the source left empty at this lead and the scorer read from the
+  // nearest lead instead. Keyed by variable to its substitute lead. Surfaced so
+  // a value in the panel does not look wrong against a blank raster on the map.
+  const fallback = result.leadFallback ?? {}
+  const byKey = Object.fromEntries(variables.map((v) => [v.key, v]))
 
   return (
     <div className="space-y-3 px-1 py-2">
@@ -70,6 +82,11 @@ export default function DistrictPanel ({ district, leadHours }) {
               <span className="w-14 shrink-0 text-muted">{spec.key}</span>
               <span className="flex-1 truncate text-text-2">
                 {fmtValue(result.values?.[spec.key], spec.unit)}
+                {fallback[spec.key] != null && (
+                  <sup className="ml-0.5 text-[9px] text-amber" title={`Empty at this lead, read from lead ${fallback[spec.key]}h`}>
+                    †{fallback[spec.key]}h
+                  </sup>
+                )}
               </span>
               <span
                 className="w-5 shrink-0 rounded text-center font-medium"
@@ -86,6 +103,15 @@ export default function DistrictPanel ({ district, leadHours }) {
             </li>
           ))}
         </ul>
+        {Object.keys(fallback).length > 0 && (
+          <p className="mt-1.5 border-t border-border pt-1.5 text-[10px] leading-snug text-muted">
+            <span className="text-amber">†</span>{' '}
+            {Object.entries(fallback)
+              .map(([key, lead]) => `${byKey[key]?.label ?? key} read from lead ${lead}h`)
+              .join(', ')}
+            , empty at this step in the source.
+          </p>
+        )}
       </div>
 
       <Legend title="CARI risk classes" kind="classed" classes={cariClasses()} />

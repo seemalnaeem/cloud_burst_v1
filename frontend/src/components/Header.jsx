@@ -22,7 +22,7 @@ export default function Header ({ leadHours, onLeadChange }) {
         <WiCloudyGusts size={30} style={{ color: 'var(--cb-cream)' }} aria-hidden="true" />
         <div>
           <h1 className="text-lg font-semibold leading-tight" style={{ color: 'var(--cb-cream)' }}>
-            Cloud Burst Portal
+            Convective Activity Risk System
           </h1>
           <p className="text-xs" style={{ color: 'var(--cb-header-text)' }}>
             Convective risk monitoring for Pakistan

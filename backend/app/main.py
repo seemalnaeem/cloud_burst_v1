@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Cloud Burst Dev API",
+        title="Convective Activity Risk System API",
         description=(
             "Forecast scoring and geoprocessing service. Thresholds and palettes "
             "come from shared/contracts, never from literals in this code."

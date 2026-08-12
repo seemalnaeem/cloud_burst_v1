@@ -1,4 +1,4 @@
-# Cloud Burst Dev stack.
+# Convective Activity Risk System stack.
 #
 # One user-defined bridge network. No fixed IP addresses anywhere, on purpose.
 # Docker allocates container addresses from its own pool and resolves service

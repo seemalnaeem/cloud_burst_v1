@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Cloud Burst Dev gateway. Single origin for the browser, cache, upstream proxy.",
+  "description": "Convective Activity Risk System gateway. Single origin for the browser, cache, upstream proxy.",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { TbAlertTriangle, TbCloudStorm } from 'react-icons/tb'
 
+import CariCard from '@/components/CariCard'
 import FeaturePanel from '@/components/FeaturePanel'
 import LayersPanel from '@/components/LayersPanel'
 import MapControls from '@/components/MapControls'
@@ -17,14 +18,16 @@ import RasterPanel from '@/components/RasterPanel'
 import StatusBanner from '@/components/StatusBanner'
 import TimeSlider from '@/components/TimeSlider'
 import MapView from '@/features/map/MapView'
+import { useCariChoropleth } from '@/hooks/useCariChoropleth'
 import { useContracts } from '@/hooks/useContracts'
 import { useForecast } from '@/hooks/useForecast'
 import { useRasterAvailability } from '@/hooks/useRasterAvailability'
 import { useTheme } from '@/hooks/useTheme'
 import { getLayerExtent, getRasterPoint } from '@/lib/api'
 import { availableBasemaps, defaultBasemapId, hasMapboxToken } from '@/lib/basemaps'
-import { contracts, rasterScale } from '@/lib/contracts'
+import { cariClasses, contracts, rasterScale } from '@/lib/contracts'
 import { DEFAULT_BOUNDS, fitToBounds, fitToExtent } from '@/lib/map'
+import { getStored, setStored } from '@/lib/storage'
 
 // Feature counts for the layer rows. Known from the ingest, and worth showing
 // because "Tehsils 553" tells you the layer loaded and "Tehsils 0" tells you it
@@ -36,6 +39,14 @@ const COUNTS = {
   pak_tehsils: 553,
   iiojk_districts: 22
 }
+
+// The administrative layers the Analysis view scores, and how each joins to its
+// choropleth. kind picks the scoring endpoint; keyField is the tile property the
+// class colours match on, unique per feature. More analysis layers land here.
+const CARI_LAYER_CONFIG = [
+  { id: 'pak_districts', kind: 'district', keyField: 'district_name' },
+  { id: 'pak_tehsils', kind: 'tehsil', keyField: 'tehsil_code' }
+]
 
 function Splash ({ children }) {
   return (
@@ -51,8 +62,12 @@ export default function App () {
 
   const [view, setView] = useState('map')
   const [map, setMap] = useState(null)
+  // Layer state is restored from a previous visit. visibleLayers is seeded in an
+  // effect once the contract is known, so its stored set can be validated against
+  // the layers that still exist; the rest restore directly and are pruned by
+  // their consumers if a key has gone stale.
   const [visibleLayers, setVisibleLayers] = useState(new Set())
-  const [opacities, setOpacities] = useState({})
+  const [opacities, setOpacities] = useState(() => getStored('opacities', {}))
   const [selection, setSelection] = useState(null)
   const [basemap, setBasemap] = useState(null)
   const [projection, setProjection] = useState('mercator')
@@ -60,12 +75,18 @@ export default function App () {
   const [panelsOpen, setPanelsOpen] = useState(true)
   const [leadIndex, setLeadIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
-  const [activeModelId, setActiveModelId] = useState(null)
-  const [levelChoice, setLevelChoice] = useState({})
+  const [activeModelId, setActiveModelId] = useState(() => getStored('activeModelId', null))
+  const [levelChoice, setLevelChoice] = useState(() => getStored('levelChoice', {}))
   const [identify, setIdentify] = useState(false)
   const [rasterSelection, setRasterSelection] = useState(null)
+  // Which CARI layers are on in the Analysis view. Its own visibility set, kept
+  // apart from the Map view's layers so switching tabs never disturbs either.
+  const [cariVisible, setCariVisible] = useState(() => new Set(getStored('cariVisible', ['pak_districts'])))
   const identifyReqRef = useRef(0)
   const initialBasemapRef = useRef(null)
+  // Flips true the first time visibility is seeded, so the persist effect below
+  // cannot write the empty initial set over a saved one before it is restored.
+  const layersHydratedRef = useRef(false)
 
   const ready = contractState.status === 'ready'
   const layers = useMemo(() => (ready ? contracts().layers : []), [ready])
@@ -91,9 +112,15 @@ export default function App () {
   const activeModel = forecastModels.find((m) => m.modelId === activeModelId) ?? null
 
   // Default the active model once availability is known: the first model with an
-  // ingested cycle, or the first in the contract if none has landed yet.
+  // ingested cycle, or the first in the contract if none has landed yet. A model
+  // restored from a previous visit that the contract no longer offers is dropped
+  // first, so the map never tries to draw a model that is not there.
   useEffect(() => {
-    if (activeModelId || forecastModels.length === 0) return
+    if (forecastModels.length === 0) return
+    if (activeModelId) {
+      if (!forecastModels.some((m) => m.modelId === activeModelId)) setActiveModelId(null)
+      return
+    }
     const withCycle = forecastModels.find((m) =>
       rasterLayers.some((l) => l.modelId === m.modelId && availability[l.id]?.ok)
     )
@@ -122,6 +149,78 @@ export default function App () {
     if (leadIndex > leads.length - 1) setLeadIndex(Math.max(0, leads.length - 1))
   }, [leads.length, leadIndex])
 
+  // --------------------------------------------------------------- Analysis
+  //
+  // The Analysis view colours whole administrative layers by CARI class. It runs
+  // off its own visibility set (cariVisible) and its own layer list, so the Map
+  // view is untouched, and it reads the same timeline: the choropleth and the
+  // detail card both score at the current lead.
+  const analysis = view === 'analysis'
+
+  const cariLayerDefs = useMemo(
+    () => CARI_LAYER_CONFIG
+      .map((c) => {
+        const def = layers.find((l) => l.id === c.id)
+        return def ? { ...c, label: def.label, color: def.color } : null
+      })
+      .filter(Boolean),
+    [layers]
+  )
+
+  const cariClassList = useMemo(() => (ready ? cariClasses() : []), [ready])
+
+  const activeCariKinds = useMemo(
+    () => cariLayerDefs.filter((c) => cariVisible.has(c.id)).map((c) => c.kind),
+    [cariLayerDefs, cariVisible]
+  )
+
+  // Poll only while the Analysis view is open, so the Map view never triggers a
+  // whole-layer scoring pass in the background.
+  const choroplethData = useCariChoropleth(analysis ? activeCariKinds : [], analysis ? activeLead : null)
+
+  // Per layer: the join value to class colour map the map fills with, built only
+  // for visible layers whose scoring has landed.
+  const cariChoropleth = useMemo(() => {
+    if (!analysis) return null
+    const out = {}
+    for (const c of cariLayerDefs) {
+      if (!cariVisible.has(c.id)) continue
+      const entry = choroplethData[c.kind]
+      if (entry?.status !== 'ready') continue
+      const byKey = {}
+      for (const f of entry.features) byKey[f.key] = cariClassList[f.classIdx]?.color ?? '#94a3b8'
+      out[c.id] = { byKey, keyField: c.keyField }
+    }
+    return out
+  }, [analysis, cariLayerDefs, cariVisible, choroplethData, cariClassList])
+
+  const cariStatus = useMemo(() => {
+    const out = {}
+    for (const c of cariLayerDefs) out[c.id] = choroplethData[c.kind]?.status
+    return out
+  }, [cariLayerDefs, choroplethData])
+
+  const effectiveVisible = analysis ? cariVisible : visibleLayers
+
+  const toggleCariLayer = useCallback((id) => {
+    setCariVisible((cur) => {
+      const next = new Set(cur)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  useEffect(() => { setStored('cariVisible', [...cariVisible]) }, [cariVisible])
+
+  // A view switch clears whatever was picked in the other view, so a district
+  // popup does not linger into Analysis and a CARI card does not linger back.
+  useEffect(() => {
+    setSelection(null)
+    setRasterSelection(null)
+    setIdentify(false)
+  }, [view])
+
   // Legend scales for the raster rows, built from the palette and the display
   // range the gateway colours the tiles with.
   const scales = useMemo(() => {
@@ -131,11 +230,35 @@ export default function App () {
     )
   }, [ready, rasterLayers])
 
-  // Seed visibility from the contract once, then it belongs to the user.
+  // Seed visibility once the contract is ready. A set saved from a previous visit
+  // wins, filtered to layers that still exist so a contract change cannot bring a
+  // dead id back to life; otherwise fall back to the contract's defaultVisible.
+  // After this one run the set belongs to the user and is persisted below.
   useEffect(() => {
-    if (!ready) return
-    setVisibleLayers(new Set(contracts().layers.filter((l) => l.defaultVisible).map((l) => l.id)))
+    if (!ready || layersHydratedRef.current) return
+    const all = contracts()
+    const validIds = new Set([...all.layers, ...all.rasterLayers].map((l) => l.id))
+    const saved = getStored('visibleLayers', null)
+    const restored = Array.isArray(saved) ? saved.filter((id) => validIds.has(id)) : null
+    setVisibleLayers(
+      restored
+        ? new Set(restored)
+        : new Set(all.layers.filter((l) => l.defaultVisible).map((l) => l.id))
+    )
+    layersHydratedRef.current = true
   }, [ready])
+
+  // Persist the layer state so a reload returns to the same map without a
+  // re-toggle. The visibility write waits for the one-time hydration above, so
+  // the empty initial set is never saved over a restored one. The others hold
+  // their restored value from mount, so writing it straight back is a no-op.
+  useEffect(() => {
+    if (!layersHydratedRef.current) return
+    setStored('visibleLayers', [...visibleLayers])
+  }, [visibleLayers])
+  useEffect(() => { setStored('opacities', opacities) }, [opacities])
+  useEffect(() => { setStored('activeModelId', activeModelId) }, [activeModelId])
+  useEffect(() => { setStored('levelChoice', levelChoice) }, [levelChoice])
 
   // Resolved during render, not in an effect. Setting it in an effect meant the
   // map mounted with one basemap for a frame and then called setStyle once
@@ -337,13 +460,14 @@ export default function App () {
         <MapView
           layers={layers}
           rasterLayers={rasterLayers}
-          visibleLayers={visibleLayers}
+          visibleLayers={effectiveVisible}
           opacities={opacities}
           basemap={activeBasemap}
           projection={projection}
           creationTime={forecast.creationTime}
           leadHours={activeLead}
-          identify={identify}
+          identify={!analysis && identify}
+          choropleth={cariChoropleth}
           onIdentify={onIdentify}
           onMapReady={setMap}
           onSelectFeature={setSelection}
@@ -358,8 +482,8 @@ export default function App () {
                 layers={layers}
                 rasterLayers={rasterLayers}
                 availability={availability}
-                visibleLayers={visibleLayers}
-                onToggleLayer={toggleLayer}
+                visibleLayers={analysis ? cariVisible : visibleLayers}
+                onToggleLayer={analysis ? toggleCariLayer : toggleLayer}
                 onZoomToLayer={zoomToLayer}
                 onShowAll={showAll}
                 onHideAll={() => setVisibleLayers(new Set())}
@@ -373,14 +497,28 @@ export default function App () {
                 onSelectLevel={selectLevel}
                 collapsed={layersCollapsed}
                 onCollapse={() => setLayersCollapsed((v) => !v)}
+                cariMode={analysis}
+                cariLayers={cariLayerDefs}
+                cariClasses={cariClassList}
+                cariStatus={cariStatus}
               />
             ) : (
               <span />
             )}
 
             <div className="flex items-start gap-3">
-              {selection && <FeaturePanel selection={selection} onClose={() => setSelection(null)} leadHours={activeLead} />}
-              {rasterSelection && <RasterPanel selection={rasterSelection} onClose={() => setRasterSelection(null)} />}
+              {/* Map view shows the attribute popup and the raster identify card;
+                  Analysis view shows the CARI score for the clicked unit. One
+                  card is up at a time and both live top right beside the controls. */}
+              {!analysis && selection && (
+                <FeaturePanel selection={selection} onClose={() => setSelection(null)} />
+              )}
+              {!analysis && rasterSelection && (
+                <RasterPanel selection={rasterSelection} onClose={() => setRasterSelection(null)} />
+              )}
+              {analysis && selection && (
+                <CariCard selection={selection} leadHours={activeLead} onClose={() => setSelection(null)} />
+              )}
               <MapControls
                 map={map}
                 projection={projection}
@@ -391,7 +529,7 @@ export default function App () {
                 activeBasemap={activeBasemap}
                 onSelectBasemap={setBasemap}
                 tokenMissing={!hasMapboxToken()}
-                identifyActive={identify}
+                identifyActive={!analysis && identify}
                 onToggleIdentify={toggleIdentify}
               />
             </div>

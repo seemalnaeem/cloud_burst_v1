@@ -69,3 +69,8 @@ Thumbs.db
 
 # Docker volumes mounted locally
 db/pgdata/
+
+# Proprietary source documents kept in docs/ for reference but not committed.
+# The numbers they carry live in the committed contracts and .md docs instead:
+# the CARI terrain and lowlands thresholds are in shared/contracts/cari.json.
+docs/*.docx

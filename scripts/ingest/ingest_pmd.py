@@ -297,14 +297,17 @@ def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | Non
                     raw.unlink(missing_ok=True)
                     log(f"  {element} {level} lead {lead}: degenerate source {sw}x{sh}, skipping")
                     continue
-                # Bring the raw pixels into the unit the contract declares. Every
-                # Int16 PMD field is tenths of its physical unit; CAPE is served
-                # as Float32 already and carries no sourceScale, so it passes
-                # through untouched. Scaling before the clip keeps one Float32
-                # path into the COG for the fields that need it.
+                # Bring the raw pixels into the unit the contract declares. The
+                # portal encodes tenths only in its Int16 rasters (GRAPES, ECMWF
+                # and GDFS): a raw temperature of 446 is 44.6 C. Its Float32
+                # rasters (PMD-WRF, ICON, and CAPE everywhere) are already in
+                # physical units, so scaling them would divide a correct value.
+                # The data type is the tell, so sourceScale is applied only to an
+                # integer source. Scaling before the clip keeps one Float32 path
+                # into the COG for the fields that need it.
                 scale = float(spec.get("sourceScale", 1.0))
                 source = raw
-                if scale != 1.0:
+                if scale != 1.0 and not is_float_raster(raw):
                     scaled = settings.tmp_dir / f"pmd_scaled_{dt}_{band_key}_{lead}.tif"
                     scale_raster(raw, scaled, scale)
                     raw.unlink(missing_ok=True)

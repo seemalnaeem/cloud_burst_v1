@@ -111,8 +111,15 @@ export const suggestDistricts = (q, signal) =>
 
 export const getCari = (district, forecastHours, matrix, signal) =>
   api.get('/api/score/cari', { district, forecast_hours: forecastHours, matrix }, { signal })
+export const getCariTehsil = (tehsilCode, forecastHours, matrix, signal) =>
+  api.get('/api/score/cari/tehsil', { tehsil_code: tehsilCode, forecast_hours: forecastHours, matrix }, { signal })
 export const getCariAll = (forecastHours, matrix, signal) =>
   api.get('/api/score/cari/all', { forecast_hours: forecastHours, matrix }, { signal })
+// The CARI class per feature for a whole layer, for the Analysis choropleth.
+// Returns status "ready" with features, or "computing" while a background pass
+// runs; the caller polls until ready. kind is "district" or "tehsil".
+export const getCariChoropleth = (kind, forecastHours, signal) =>
+  api.get('/api/score/cari/choropleth', { kind, forecast_hours: forecastHours }, { signal })
 export const getSusceptibility = (forecastHours, signal) =>
   api.get('/api/score/susceptibility', { forecast_hours: forecastHours }, { signal })
 export const getPrioritized = (top, signal) =>

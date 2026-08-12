@@ -6,6 +6,8 @@
     "primary": 1,
     "secondary": 0.75
   },
+  "$sourcePriorityNote": "Order the resolver walks to source a variable whose sourceModel is 'auto': it takes the first model here that actually catalogues the variable's band. PMD-WRF is preferred, then ECMWF-IFS, then ICON, then GFS, with GRAPES as the final backstop for the fields only it serves (precipitable water). Wind and vertical velocity exist only under GFS, so they land there; TCWV lands on GRAPES; everything else resolves to PMD-WRF.",
+  "sourcePriority": ["WRFPRS", "D1D", "ICON", "GFS", "GRAPES"],
   "variables": [
     {
       "key": "RF",
@@ -15,7 +17,7 @@
       "tier": "primary",
       "order": "asc",
       "reducer": "max",
-      "sourceModel": "GRAPES",
+      "sourceModel": "auto",
       "sourceBand": "pmd_hourtpe"
     },
     {
@@ -26,7 +28,7 @@
       "tier": "primary",
       "order": "asc",
       "reducer": "max",
-      "sourceModel": "GRAPES",
+      "sourceModel": "auto",
       "sourceBand": "pmd_cape"
     },
     {
@@ -37,8 +39,10 @@
       "tier": "primary",
       "order": "asc",
       "reducer": "max",
-      "sourceModel": "GRAPES",
-      "sourceBand": "pmd_pwat"
+      "sourceModel": "auto",
+      "sourceBand": "pmd_pwat",
+      "$leadFallbackComment": "GRAPES serves precipitable water empty at its 12-hourly synoptic steps (leads 0, 12, 24, ...) but populated at the 3-hourly steps in between. Precipitable water changes slowly, so when the target lead comes back empty the scorer substitutes the nearest lead that has data rather than grading a real primary input as zero.",
+      "leadFallback": true
     },
     {
       "key": "RH700",
@@ -52,7 +56,7 @@
         0,
         100
       ],
-      "sourceModel": "GRAPES",
+      "sourceModel": "auto",
       "sourceBand": "pmd_rhu_700"
     },
     {
@@ -63,7 +67,7 @@
       "tier": "primary",
       "order": "desc",
       "reducer": "min",
-      "sourceModel": "GFS",
+      "sourceModel": "auto",
       "sourceBand": "vertical_velocity_pl700"
     },
     {
@@ -85,7 +89,7 @@
       "tier": "primary",
       "order": "asc",
       "reducer": "max",
-      "sourceModel": "GFS",
+      "sourceModel": "auto",
       "sourceBand": "wind_speed_pl850"
     },
     {
@@ -96,7 +100,7 @@
       "tier": "primary",
       "order": "asc",
       "reducer": "max",
-      "sourceModel": "GRAPES",
+      "sourceModel": "auto",
       "sourceBand": "pmd_dpt"
     },
     {
@@ -111,7 +115,7 @@
         0,
         100
       ],
-      "sourceModel": "GRAPES",
+      "sourceModel": "auto",
       "sourceBand": "pmd_rhu_500"
     },
     {
@@ -122,7 +126,7 @@
       "tier": "secondary",
       "order": "desc",
       "reducer": "min",
-      "sourceModel": "GFS",
+      "sourceModel": "auto",
       "sourceBand": "vertical_velocity_pl500"
     },
     {
@@ -133,7 +137,7 @@
       "tier": "secondary",
       "order": "asc",
       "reducer": "max",
-      "sourceModel": "GRAPES",
+      "sourceModel": "auto",
       "sourceBand": "pmd_tem"
     },
     {
@@ -144,7 +148,7 @@
       "tier": "secondary",
       "order": "asc",
       "reducer": "max",
-      "sourceModel": "GRAPES",
+      "sourceModel": "auto",
       "sourceBand": "pmd_tem_850"
     },
     {
@@ -443,7 +447,9 @@
       "khyberpakhtunkhwa",
       "kpk",
       "kp",
-      "nwfp"
+      "nwfp",
+      "balochistan",
+      "baluchistan"
     ],
     "punjabTerrainDistricts": [
       "Rawalpindi",
@@ -525,5 +531,5 @@
     "targetLocalHour": 12,
     "timezoneOffsetHours": 5
   },
-  "$scoreSourceNote": "sourceModel/sourceBand say where each variable is actually read from in wx.raster_catalog. band stays the canonical key for display range and reference. PMD GRAPES carries the surface and RH/TEM pressure inputs; wind_speed and vertical_velocity come from NOAA GFS; elevation and slope are static (sourceModel null). Each variable resolves against its own model latest cycle at the requested lead, so cross-source inputs align by lead when both feeds are current."
+  "$scoreSourceNote": "sourceBand is the wx.raster_catalog band a variable is read from; band stays the canonical key for display range and reference. sourceModel is 'auto' for a forecast field, meaning resolve the model by sourcePriority against what the catalogue actually carries, or null for a static field (elevation, slope). Today that resolves to PMD-WRF for RF, CAPE, RH700, RH500, DP, T2M and T850, GRAPES for TCWV (the only model serving precipitable water), and GFS for wind and vertical velocity. Each variable resolves against its own model latest cycle at the requested lead, so cross-source inputs align by lead when both feeds are current."
 }

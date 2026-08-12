@@ -40,6 +40,21 @@ async def cari(
     return await score_service.cari_for_district(district, forecast_hours, matrix)
 
 
+@router.get("/cari/tehsil")
+async def cari_tehsil(
+    tehsil_code: str = Query(..., description="Exact tehsil_code, the unique key"),
+    forecast_hours: int = Query(0, ge=-168, le=360),
+    matrix: Matrix | None = Query(None),
+) -> dict:
+    """CARI for one tehsil, scored over its own geometry.
+
+    The tehsil takes its threshold matrix from its parent district. Same detail
+    envelope as the district card, so the Analysis card renders either from one
+    shape.
+    """
+    return await score_service.cari_for_tehsil(tehsil_code, forecast_hours, matrix)
+
+
 @router.get("/cari/all")
 async def cari_all(
     forecast_hours: int = Query(0, ge=-168, le=360),
@@ -51,6 +66,23 @@ async def cari_all(
     old design embedded polygons here and produced a 190 MB response.
     """
     return await score_service.cari_all(forecast_hours, matrix)
+
+
+@router.get("/cari/choropleth")
+async def cari_choropleth(
+    kind: Literal["district", "tehsil"] = Query(
+        "district", description="Which layer to score for thematic mapping"
+    ),
+    forecast_hours: int = Query(0, ge=-168, le=360),
+    matrix: Matrix | None = Query(None),
+) -> dict:
+    """CARI class per feature for a whole layer, for the Analysis choropleth.
+
+    One class and percentage per feature, keyed by the map join field. The first
+    call scores every feature and caches the array; later calls for the same
+    cycle and lead are a single read. The tehsil layer is a large first pass.
+    """
+    return await score_service.cari_choropleth(kind, forecast_hours, matrix)
 
 
 @router.get("/susceptibility")

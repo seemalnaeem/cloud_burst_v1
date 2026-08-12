@@ -97,6 +97,51 @@ async def district_extent(name: str) -> dict[str, float] | None:
     return dict(row) if row else None
 
 
+async def list_tehsils() -> list[dict[str, Any]]:
+    """Every tehsil with what CARI needs to score it.
+
+    tehsil_code is the join key the choropleth colours by, because tehsil names
+    repeat across districts. province and district_src pick the threshold matrix,
+    the same rule districts use, applied to the tehsil's parent district.
+    """
+    rows = await pool.fetch(
+        """
+        SELECT tehsil_code, tehsil, province, district_src
+        FROM geo.tehsils
+        ORDER BY tehsil_code
+        """
+    )
+    return [dict(r) for r in rows]
+
+
+async def tehsil_geometry(tehsil_code: str, tolerance_deg: float | None = None) -> dict[str, Any]:
+    """Tehsil geometry as GeoJSON, for zonal statistics.
+
+    Keyed on tehsil_code, the unique identifier; the human name is not unique.
+    The parent district comes back as district_src so the caller can pick the
+    same terrain matrix a district would.
+    """
+    geometry = "geom" if tolerance_deg is None else f"ST_SimplifyPreserveTopology(geom, {float(tolerance_deg)})"
+    row = await pool.fetchrow(
+        f"""
+        SELECT tehsil_code, tehsil, province, district_src,
+               ST_AsGeoJSON({geometry})::text AS geometry
+        FROM geo.tehsils
+        WHERE tehsil_code = $1
+        """,
+        tehsil_code,
+    )
+    if row is None:
+        raise DistrictNotFound(tehsil_code, [])
+    return {
+        "tehsil_code": row["tehsil_code"],
+        "tehsil": row["tehsil"],
+        "province": row["province"],
+        "district_src": row["district_src"],
+        "geometry": json.loads(row["geometry"]),
+    }
+
+
 # A fixed allowlist of layer id to source, so the extent query never interpolates
 # anything a caller supplied. This is the "map a dynamic table name through a
 # fixed allowlist" rule from the security guardrail made concrete. A tuple is
@@ -195,6 +240,28 @@ async def available_cycles(model: str, limit: int = 40) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+async def catalogued_leads(band_key: str, model: str | None, creation_time) -> list[int]:
+    """The lead hours a band is catalogued at, for one model and cycle.
+
+    Used by the nearest-lead fallback: a field the source leaves empty at some
+    leads (GRAPES precipitable water at the synoptic steps) is scored from the
+    closest lead that has data, and this is how the scorer learns which leads
+    that band actually offers.
+    """
+    rows = await pool.fetch(
+        """
+        SELECT lead_hours FROM wx.raster_catalog
+        WHERE band_key = $1 AND model = $2 AND creation_time = $3
+              AND lead_hours IS NOT NULL
+        ORDER BY lead_hours
+        """,
+        band_key,
+        model,
+        creation_time,
+    )
+    return [r["lead_hours"] for r in rows]
+
+
 async def raster_path(band_key: str, model: str | None, creation_time, lead_hours: int | None) -> str | None:
     """Resolve a band, model, cycle and lead to a COG path.
 
@@ -280,6 +347,51 @@ async def store_cari(creation_time, lead_hours: int, district: str, result) -> N
         result.cari,
         result.class_idx,
         result.override_applied,
+    )
+
+
+async def cached_choropleth(feature_kind: str, creation_time, lead_hours: int) -> dict | None:
+    """The cached class array for a whole layer, or None if it has not been built.
+
+    The pool registers no jsonb codec, so a jsonb column comes back as text and
+    the payload is parsed here rather than handed on as a string.
+    """
+    row = await pool.fetchrow(
+        """
+        SELECT payload, feature_count, computed_at
+        FROM score.cari_choropleth
+        WHERE feature_kind = $1 AND creation_time = $2 AND lead_hours = $3
+        """,
+        feature_kind,
+        creation_time,
+        lead_hours,
+    )
+    if row is None:
+        return None
+    out = dict(row)
+    if isinstance(out["payload"], str):
+        out["payload"] = json.loads(out["payload"])
+    return out
+
+
+async def store_choropleth(
+    feature_kind: str, creation_time, lead_hours: int, payload: list[dict]
+) -> None:
+    await pool.execute(
+        """
+        INSERT INTO score.cari_choropleth
+            (feature_kind, creation_time, lead_hours, payload, feature_count)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (feature_kind, creation_time, lead_hours)
+        DO UPDATE SET payload = EXCLUDED.payload,
+                      feature_count = EXCLUDED.feature_count,
+                      computed_at = now()
+        """,
+        feature_kind,
+        creation_time,
+        lead_hours,
+        json.dumps(payload),
+        len(payload),
     )
 
 

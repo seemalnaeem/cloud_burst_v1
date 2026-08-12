@@ -19,7 +19,7 @@ Set-Location $root
 
 function Show-Help {
   Write-Host @'
-Cloud Burst Dev stack
+Convective Activity Risk System stack
 
   up        Build and start everything
   down      Stop, keeping the database volume

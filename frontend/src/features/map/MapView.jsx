@@ -22,7 +22,7 @@ import { getWindField } from '@/lib/api'
 import { mapboxToken, styleUrl } from '@/lib/basemaps'
 import {
   DEFAULT_CENTER, DEFAULT_ZOOM,
-  addRasterLayer, addVectorLayer, layerIdsFor, removeRasterLayer,
+  addRasterLayer, addVectorLayer, layerIdsFor, paintByScore, removeRasterLayer, resetPaint,
   setLayerOpacity, setLayerVisible, setRasterOpacity, setRasterTime
 } from '@/lib/map'
 import { removeWindBarbs, setWindBarbs } from '@/lib/windBarbs'
@@ -39,6 +39,7 @@ export default function MapView ({
   creationTime = null,
   leadHours = null,
   identify = false,
+  choropleth = null,
   onIdentify,
   onMapReady,
   onSelectFeature,
@@ -51,6 +52,8 @@ export default function MapView ({
   const styledWithRef = useRef(null)
   const barbAbortRef = useRef(null)
   const renderBarbsRef = useRef(null)
+  const applyChoroplethRef = useRef(null)
+  const paintedRef = useRef(new Set())
   const [ready, setReady] = useState(false)
   const [failure, setFailure] = useState(null)
 
@@ -114,8 +117,10 @@ export default function MapView ({
     map.on('style.load', () => {
       installLayers()
       // A style rebuild drops our images, sources and layers, so the barb
-      // overlay has to be put back too. The effect below owns the latest render.
+      // overlay and the choropleth fill have to be put back too. Both effects
+      // below own the latest render and stash it in a ref for exactly this.
       renderBarbsRef.current?.()
+      applyChoroplethRef.current?.()
       setReady(true)
       onMapReady?.(map)
     })
@@ -169,7 +174,17 @@ export default function MapView ({
     // first, and the contract lists layers coarse to fine, so the topmost hit
     // is always the most specific thing under the cursor: tehsil over district,
     // district over province, province over country.
-    const topmostAt = (point) => map.queryRenderedFeatures(point, { layers: targets })[0] ?? null
+    // Filter to layers that currently exist. A basemap switch runs setStyle,
+    // which drops every layer until the style.load handler re-adds them, and a
+    // mousemove landing in that gap would query a layer id that is momentarily
+    // gone. Mapbox answers that with a hard error ("layer '...' does not exist
+    // in the map's style") that surfaces in the failure banner, so query only
+    // what is on the map right now; the set fills back in after the rebuild.
+    const topmostAt = (point) => {
+      const present = targets.filter((id) => map.getLayer(id))
+      if (!present.length) return null
+      return map.queryRenderedFeatures(point, { layers: present })[0] ?? null
+    }
 
     const clearHover = () => {
       if (hoveredRef.current) {
@@ -362,6 +377,43 @@ export default function MapView ({
 
     return () => barbAbortRef.current?.abort()
   }, [ready, rasterLayers, visibleLayers, creationTime, leadHours])
+
+  // ------------------------------------------------------------- choropleth
+  //
+  // In the Analysis view a layer is coloured by CARI class instead of its own
+  // outline colour. The join is client side, a match expression on the layer's
+  // key field, so the score endpoints stay geometry free. The applied paint is
+  // stashed in a ref so a basemap rebuild, which drops the paint with the layer,
+  // can put it straight back from the style.load handler above.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+
+    const apply = () => {
+      const m = mapRef.current
+      if (!m || !m.getStyle()) return
+      const active = choropleth ?? {}
+
+      // Reset any layer that was painted and no longer is.
+      for (const layerId of paintedRef.current) {
+        if (!active[layerId]) {
+          const def = layers.find((l) => l.id === layerId)
+          if (def) resetPaint(m, def)
+        }
+      }
+
+      const painted = new Set()
+      for (const [layerId, entry] of Object.entries(active)) {
+        if (!entry?.byKey) continue
+        paintByScore(m, layerId, entry.byKey, (color) => color, entry.keyField)
+        painted.add(layerId)
+      }
+      paintedRef.current = painted
+    }
+
+    applyChoroplethRef.current = apply
+    apply()
+  }, [ready, choropleth, layers])
 
   // ------------------------------------------------------------- basemap
   //

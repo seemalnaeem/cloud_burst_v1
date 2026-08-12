@@ -55,12 +55,18 @@ BEGIN
            'federalcapital','islamabad','islamabadcapitalterritory',
            'gilgitbaltistan','gb',
            'indianillegallyoccupiedjammukashmir','iiojk','jammuandkashmir',
-           'khyberpakhtunkhwa','kpk','kp') THEN
+           'khyberpakhtunkhwa','kpk','kp',
+           'balochistan','baluchistan') THEN
     RETURN 'terrain';
   END IF;
 
   IF p LIKE 'punjab%' THEN
-    IF district_in IN ('Rawalpindi','Jhelum','Attock','Chakwal','Murree') THEN
+    -- Normalize the district the same way as the province: the district layer
+    -- spells these Title Case but the tehsil layer files the parent district
+    -- upper case, and a raw comparison would drop every Potohar tehsil to the
+    -- lowlands matrix. Kept in step with app.models.cari.terrain_class.
+    IF lower(regexp_replace(coalesce(district_in, ''), '[^A-Za-z]', '', 'g'))
+       IN ('rawalpindi','jhelum','attock','chakwal','murree') THEN
       RETURN 'terrain';
     END IF;
     RETURN 'lowlands';

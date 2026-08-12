@@ -1,4 +1,4 @@
-# CLAUDE.md - Cloud Burst Dev
+# CLAUDE.md - Convective Activity Risk System
 
 A cloudburst risk portal for Pakistan. Ingests forecast rasters and administrative boundaries, runs
 three scoring models (CARI, hotspot mask, susceptibility), renders them on a web map with legends,
@@ -7,14 +7,14 @@ alerts and district drill-downs.
 A rebuild: the old system was a 3,600 line Flask file on Google Earth Engine plus a 6,000 line React
 file on GeoServer. Both platforms are ruled out here.
 
-## Source documents at the root
+## Source documents in docs/
 
 | File | Authority for |
 |---|---|
-| [DATA_SOURCES.md](DATA_SOURCES.md) | the science: sources, thresholds, palettes, endpoints. Section 9 the models, **section 12 the known discrepancies** (code values win over comments) |
-| [COLOR_SCHEMES.md](COLOR_SCHEMES.md) | UI theme, every `--cb-*` token in light and dark |
-| [OPEN_DATA_SOURCES.md](OPEN_DATA_SOURCES.md) | where data comes from now, all anonymous |
-| [LAYER_REQUIREMENTS.md](LAYER_REQUIREMENTS.md) | what layers are needed and in what shape |
+| [DATA_SOURCES.md](docs/DATA_SOURCES.md) | the science: sources, thresholds, palettes, endpoints. Section 9 the models, **section 12 the known discrepancies** (code values win over comments) |
+| [COLOR_SCHEMES.md](docs/COLOR_SCHEMES.md) | UI theme, every `--cb-*` token in light and dark |
+| [OPEN_DATA_SOURCES.md](docs/OPEN_DATA_SOURCES.md) | where data comes from now, all anonymous |
+| [LAYER_REQUIREMENTS.md](docs/LAYER_REQUIREMENTS.md) | what layers are needed and in what shape |
 | `app.py` | the legacy implementation, kept for reference. Read before changing any calculation |
 
 Do not restate their numbers as literals; load from [shared/contracts/](shared/contracts/).

@@ -94,7 +94,7 @@ export default function Navbar ({ view, onView, isDark, onToggleTheme, status = 
         </span>
         <div className="min-w-0 leading-tight">
           <h1 className="truncate text-[15px] font-semibold tracking-tight text-cream">
-            Cloud Burst Risk Portal
+            Convective Activity Risk System
           </h1>
           <p className="hidden truncate text-[11px] sm:block" style={{ color: 'var(--cb-header-text)' }}>
             Pakistan Meteorological Department

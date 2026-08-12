@@ -1,4 +1,4 @@
-// Cloud Burst Dev gateway.
+// Convective Activity Risk System gateway.
 //
 // The only port the browser talks to. Fans /api to FastAPI, /tiles to
 // pg_tileserv and /raster to TiTiler, so the client sees one origin and never

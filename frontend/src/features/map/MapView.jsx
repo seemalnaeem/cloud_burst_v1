@@ -40,6 +40,7 @@ export default function MapView ({
   leadHours = null,
   identify = false,
   choropleth = null,
+  selection = null,
   onIdentify,
   onMapReady,
   onSelectFeature,
@@ -254,6 +255,20 @@ export default function MapView ({
       map.getCanvas().removeEventListener('mouseout', onLeaveCanvas)
     }
   }, [ready, layers, visibleLayers, onSelectFeature, onHoverFeature, identify])
+
+  // Clear the highlight when the selection is dropped elsewhere. Closing the
+  // card or switching view sets the App selection to null, but the selected
+  // feature-state lives on the map, so without this the red outline and fill
+  // linger after the card is gone. Clicking a new feature is handled in the
+  // click handler above; this only mirrors an external clear.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    if (!selection && selectedRef.current) {
+      map.setFeatureState(selectedRef.current, { selected: false })
+      selectedRef.current = null
+    }
+  }, [ready, selection])
 
   // ------------------------------------------------------------- identify
   //

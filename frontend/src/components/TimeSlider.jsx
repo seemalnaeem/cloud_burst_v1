@@ -65,7 +65,8 @@ export default function TimeSlider ({
   onIndex,
   playing,
   onPlayToggle,
-  activeLayers = []  // labels of temporal layers currently shown
+  activeLayers = [],  // labels of temporal layers currently shown
+  analysis = false    // Analysis view: the lead drives CARI scoring, not a raster
 }) {
   const timer = useRef(null)
   const trackRef = useRef(null)
@@ -217,15 +218,19 @@ export default function TimeSlider ({
       {/* Footer: what this cycle is, and which layers the time applies to. */}
       <div className="mt-2 flex items-center justify-between border-t border-border pt-1.5 text-[10.5px] text-muted">
         <span>
-          <span className="font-medium text-text-2">{model}</span>
+          {/* Map view names the one model driving the raster; Analysis names the
+              models the CAR Index actually blends, which is not a single one. */}
+          <span className="font-medium text-text-2">{analysis ? 'PMD-WRF, GRAPES, GFS' : model}</span>
           {'  cycle '}
           <span className="font-mono">{cycleLabel(cycleDate)}</span>
           {`  step ${index + 1}/${count}`}
         </span>
         <span className="truncate pl-3 text-right">
-          {activeLayers.length
-            ? <>Applies to: <span className="text-text-2">{activeLayers.join(', ')}</span></>
-            : 'No temporal layer shown yet'}
+          {analysis
+            ? <>Scoring the CAR Index at <span className="text-text-2">{leadText(lead)}</span></>
+            : activeLayers.length
+              ? <>Applies to: <span className="text-text-2">{activeLayers.join(', ')}</span></>
+              : 'No temporal layer shown yet'}
         </span>
       </div>
     </div>

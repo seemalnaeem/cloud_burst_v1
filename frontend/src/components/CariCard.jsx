@@ -49,7 +49,7 @@ export default function CariCard ({ selection, leadHours, onClose }) {
 
   return (
     <Panel
-      title="Convective activity risk (CARI)"
+      title={<span className="normal-case">CAR Index</span>}
       icon={TbCloudStorm}
       accent={cari.data?.riskColor}
       className="max-h-[calc(100vh-7rem)] w-[300px]"
@@ -85,10 +85,14 @@ function Body ({ feature, cari }) {
     <div className="space-y-3">
       <div className="min-w-0">
         <h3 className="truncate text-[15px] font-semibold leading-tight text-text">{feature.label}</h3>
-        <p className="mt-0.5 truncate text-[11.5px] text-muted">
-          {[feature.sub, `${result.matrix} matrix`].filter(Boolean).join(' · ')}
-          {result.matrixAuto ? ' (auto)' : ' (forced)'}
-        </p>
+        <div className="mt-0.5 flex items-center gap-2">
+          {feature.sub && (
+            <p className="min-w-0 truncate text-[11.5px] text-muted">{feature.sub}</p>
+          )}
+          <span className="ml-auto inline-flex shrink-0 items-center justify-center rounded-full border border-primary-border bg-primary-soft px-2.5 py-1 text-[10px] font-semibold leading-none text-primary">
+            {result.matrix === 'terrain' ? 'Terrain' : 'Lowland'}
+          </span>
+        </div>
       </div>
 
       <div

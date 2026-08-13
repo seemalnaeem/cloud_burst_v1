@@ -257,12 +257,17 @@ function Lightbox ({ photos, index, onGo, onClose }) {
 
   useEffect(() => {
     const onKey = (ev) => {
-      if (ev.key === 'Escape') onClose()
-      else if (ev.key === 'ArrowLeft') onGo(-1)
+      if (ev.key === 'Escape') {
+        // Consume it so the app-level Escape does not also close the card
+        // underneath: one press shuts the lightbox, the next shuts the card.
+        ev.stopImmediatePropagation()
+        onClose()
+      } else if (ev.key === 'ArrowLeft') onGo(-1)
       else if (ev.key === 'ArrowRight') onGo(1)
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // Capture phase, so this runs before the app's bubble-phase Escape handler.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [onGo, onClose])
 
   const count = photos.length

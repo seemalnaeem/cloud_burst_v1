@@ -222,6 +222,21 @@ export default function App () {
     setIdentify(false)
   }, [view])
 
+  // Escape closes the open top-right card in either view, the same as its close
+  // button, for the feature panel, the CAR Index card, the event card and the
+  // raster identify card alike. The event card's full-screen image lightbox
+  // consumes Escape first (a capturing listener there), so one press closes the
+  // lightbox and a second closes the card.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      setSelection(null)
+      setRasterSelection(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // Legend scales for the raster rows, built from the palette and the display
   // range the gateway colours the tiles with.
   const scales = useMemo(() => {
@@ -478,6 +493,7 @@ export default function App () {
           leadHours={activeLead}
           identify={!analysis && identify}
           choropleth={cariChoropleth}
+          selection={selection}
           onIdentify={onIdentify}
           onMapReady={setMap}
           onSelectFeature={setSelection}
@@ -563,6 +579,7 @@ export default function App () {
                 playing={playing}
                 onPlayToggle={() => setPlaying((v) => !v)}
                 activeLayers={activeTemporalLabels}
+                analysis={analysis}
               />
             ) : (
               <div className="pointer-events-auto flex items-center gap-2 rounded-cb-sm border border-amber-border bg-amber-soft px-3 py-2">

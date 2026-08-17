@@ -642,6 +642,12 @@ export default function LayersPanel ({
     list.sort((a, b) => (a.level === 0 ? -1 : b.level === 0 ? 1 : b.level - a.level))
   }
 
+  // Only the elements the active model actually catalogues. A field a model does
+  // not publish, ICON carries no temperature, dew point or humidity, is left out
+  // rather than shown as a dead faded row that reads as broken. This is driven by
+  // the live catalogue, so the field returns on its own the moment it is ingested.
+  const availableElements = elementOrder.filter((el) => byElement.get(el).some((v) => availability[v.id]?.ok))
+
   const genericRow = (layer, withOpacity, temporal, reorder, defaultOpen = false) => {
     const state = availability[layer.id]
     return (
@@ -750,7 +756,7 @@ export default function LayersPanel ({
           )}
 
           {view === 'forecast' && models.length > 0 && (
-            <Section label="Forecast models" count={elementOrder.length}>
+            <Section label="Forecast models" count={availableElements.length}>
               <li className="border-b border-border/60 px-2 py-2">
                 <ModelSelect
                   models={models}
@@ -760,14 +766,15 @@ export default function LayersPanel ({
                 />
               </li>
 
-              {elementOrder.map((el) => {
-                const variants = byElement.get(el)
+              {availableElements.map((el) => {
+                // Only the catalogued levels of this element, so the level picker
+                // never offers a pressure the model does not publish either.
+                const variants = byElement.get(el).filter((v) => availability[v.id]?.ok)
                 const key = `${activeModelId}:${el}`
                 const chosen = levelChoice[key]
                 const activeDef = variants.find((v) => v.level === chosen)
                   ?? variants.find((v) => v.level === 0)
                   ?? variants[0]
-                const state = availability[activeDef.id]
                 return (
                   <ForecastRow
                     key={key}
@@ -781,7 +788,7 @@ export default function LayersPanel ({
                     scale={scales[activeDef.id]}
                     opacity={opacities[activeDef.id] ?? activeDef.opacity ?? 1}
                     onOpacity={(v) => onOpacity(activeDef.id, v)}
-                    unavailable={state && !state.ok ? state.reason : null}
+                    unavailable={null}
                   />
                 )
               })}

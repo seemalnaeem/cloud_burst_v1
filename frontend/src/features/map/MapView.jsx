@@ -22,12 +22,27 @@ import { getWindField } from '@/lib/api'
 import { mapboxToken, styleUrl } from '@/lib/basemaps'
 import {
   DEFAULT_CENTER, DEFAULT_ZOOM,
-  addRasterLayer, addVectorLayer, layerIdsFor, paintByScore, raiseSelectionOutlines,
-  removeRasterLayer, resetPaint, setLayerOpacity, setLayerVisible, setRasterOpacity, setRasterTime
+  addRasterLayer, addVectorLayer, applyLayerOrder, layerIdsFor, paintByScore,
+  raiseSelectionOutlines, removeRasterLayer, resetPaint, setLayerOpacity, setLayerVisible,
+  setRasterOpacity, setRasterTime
 } from '@/lib/map'
 import { removeWindBarbs, setWindBarbs } from '@/lib/windBarbs'
 
 mapboxgl.accessToken = mapboxToken()
+
+// Which cycle and lead a raster layer's tiles resolve against. An ordinary
+// forecast layer follows the active model's cycle and the slider lead. A computed
+// layer (the per pixel CAR Index, the hotspot mask) lives on the WRFPRS grid at a
+// snapped lead, prepared out of band, so it uses the time the compute endpoint
+// returned and shows nothing until that entry reads "ready".
+function rasterTimeFor (def, computedTimes, creationTime, leadHours) {
+  if (def.source === 'computed') {
+    const c = computedTimes?.[def.id]
+    if (!c || c.status !== 'ready') return null
+    return { creationTime: c.creationTime, leadHours: c.leadHours }
+  }
+  return { creationTime, leadHours }
+}
 
 export default function MapView ({
   layers,
@@ -38,9 +53,11 @@ export default function MapView ({
   projection,
   creationTime = null,
   leadHours = null,
+  computedTimes = {},
   identify = false,
   choropleth = null,
   selection = null,
+  layerOrder = null,
   onIdentify,
   onMapReady,
   onSelectFeature,
@@ -54,20 +71,21 @@ export default function MapView ({
   const barbAbortRef = useRef(null)
   const renderBarbsRef = useRef(null)
   const applyChoroplethRef = useRef(null)
+  const applyOrderRef = useRef(null)
   const paintedRef = useRef(new Set())
   const [ready, setReady] = useState(false)
   const [failure, setFailure] = useState(null)
 
   // Latest props without re-running the init effect. The map is created once.
-  const propsRef = useRef({ layers, rasterLayers, visibleLayers, opacities, creationTime, leadHours })
-  propsRef.current = { layers, rasterLayers, visibleLayers, opacities, creationTime, leadHours }
+  const propsRef = useRef({ layers, rasterLayers, visibleLayers, opacities, creationTime, leadHours, computedTimes })
+  propsRef.current = { layers, rasterLayers, visibleLayers, opacities, creationTime, leadHours, computedTimes }
 
   /** Put every contract layer on the map. Safe to call repeatedly. */
   const installLayers = useCallback(() => {
     const map = mapRef.current
     if (!map || !map.getStyle()) return
     const { layers: defs, rasterLayers: rasters, visibleLayers: visible, opacities: op,
-      creationTime: ct, leadHours: lh } = propsRef.current
+      creationTime: ct, leadHours: lh, computedTimes: ctimes } = propsRef.current
 
     // Vectors first. Rasters are inserted beneath the lowest vector layer, so
     // there has to be one for them to go beneath.
@@ -78,7 +96,9 @@ export default function MapView ({
 
     rasters.forEach((def) => {
       if (!visible.has(def.id)) return
-      addRasterLayer(map, def, { opacity: op[def.id] ?? def.opacity, creationTime: ct, leadHours: lh })
+      const t = rasterTimeFor(def, ctimes, ct, lh)
+      if (!t) return
+      addRasterLayer(map, def, { opacity: op[def.id] ?? def.opacity, creationTime: t.creationTime, leadHours: t.leadHours })
     })
 
     // Every polygon layer's selection outline goes to the very top now that all
@@ -123,8 +143,10 @@ export default function MapView ({
     map.on('style.load', () => {
       installLayers()
       // A style rebuild drops our images, sources and layers, so the barb
-      // overlay and the choropleth fill have to be put back too. Both effects
-      // below own the latest render and stash it in a ref for exactly this.
+      // overlay, the choropleth fill and the chosen stacking order all have to be
+      // put back too. Each effect below owns the latest render and stashes it in a
+      // ref for exactly this.
+      applyOrderRef.current?.()
       renderBarbsRef.current?.()
       applyChoroplethRef.current?.()
       setReady(true)
@@ -331,13 +353,16 @@ export default function MapView ({
     if (!map || !ready) return
 
     rasterLayers.forEach((def) => {
-      if (visibleLayers.has(def.id)) {
-        addRasterLayer(map, def, { opacity: opacities[def.id] ?? def.opacity, creationTime, leadHours })
+      const t = visibleLayers.has(def.id) ? rasterTimeFor(def, computedTimes, creationTime, leadHours) : null
+      if (t) {
+        addRasterLayer(map, def, { opacity: opacities[def.id] ?? def.opacity, creationTime: t.creationTime, leadHours: t.leadHours })
       } else {
+        // A computed layer that is toggled on but not ready yet resolves to no
+        // time and is removed until its COG lands, then this effect re-adds it.
         removeRasterLayer(map, def.id)
       }
     })
-  }, [ready, rasterLayers, visibleLayers, opacities, creationTime, leadHours])
+  }, [ready, rasterLayers, visibleLayers, opacities, creationTime, leadHours, computedTimes])
 
   useEffect(() => {
     const map = mapRef.current
@@ -354,13 +379,15 @@ export default function MapView ({
   // position and its opacity and only the pixels change.
   useEffect(() => {
     const map = mapRef.current
-    if (!map || !ready || creationTime == null || leadHours == null) return
+    if (!map || !ready) return
     rasterLayers.forEach((def) => {
-      if (def.temporal && visibleLayers.has(def.id)) {
-        setRasterTime(map, def, { creationTime, leadHours })
+      if (!def.temporal || !visibleLayers.has(def.id)) return
+      const t = rasterTimeFor(def, computedTimes, creationTime, leadHours)
+      if (t && t.creationTime != null && t.leadHours != null) {
+        setRasterTime(map, def, { creationTime: t.creationTime, leadHours: t.leadHours })
       }
     })
-  }, [ready, rasterLayers, visibleLayers, creationTime, leadHours])
+  }, [ready, rasterLayers, visibleLayers, creationTime, leadHours, computedTimes])
 
   // ------------------------------------------------------------- wind barbs
   //
@@ -437,6 +464,26 @@ export default function MapView ({
     applyChoroplethRef.current = apply
     apply()
   }, [ready, choropleth, layers])
+
+  // ------------------------------------------------------------- layer order
+  //
+  // The order dock hands down a top-first list of vector layer ids. This resolves
+  // them to their contract defs and restacks the map so the top of the dock is the
+  // top of the map. Stashed in a ref so a basemap rebuild reapplies it too.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+
+    const apply = () => {
+      const m = mapRef.current
+      if (!m || !m.getStyle() || !layerOrder?.length) return
+      const byId = new Map(propsRef.current.layers.map((l) => [l.id, l]))
+      applyLayerOrder(m, layerOrder.map((id) => byId.get(id)).filter(Boolean))
+    }
+
+    applyOrderRef.current = apply
+    apply()
+  }, [ready, layerOrder])
 
   // ------------------------------------------------------------- basemap
   //

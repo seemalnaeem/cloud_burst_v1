@@ -10,16 +10,19 @@
 
 import { useEffect, useState } from 'react'
 import {
-  TbCloudStorm, TbMap2, TbChartBar, TbBellRinging, TbSun, TbMoon,
-  TbCircleFilled, TbMenu2
+  TbCloudStorm, TbMap2, TbCloud, TbChartBar, TbSun, TbMoon,
+  TbMenu2, TbRadar2
 } from 'react-icons/tb'
 
 import { IconButton } from './ui/Panel'
 
+// Map first, then the two analytical views, Radar last. Radar carries the alerts
+// once its logic lands, so there is no separate alerts tab.
 const VIEWS = [
   { id: 'map', label: 'Map', icon: TbMap2 },
+  { id: 'forecast', label: 'Forecast', icon: TbCloud },
   { id: 'analysis', label: 'Analysis', icon: TbChartBar },
-  { id: 'alerts', label: 'Alerts', icon: TbBellRinging }
+  { id: 'radar', label: 'Radar', icon: TbRadar2 }
 ]
 
 function Clock () {
@@ -41,36 +44,7 @@ function Clock () {
   )
 }
 
-/**
- * Upstream health.
- *
- * Deliberately states which thing is unavailable rather than showing a generic
- * amber dot. "Forecast pending" is actionable; "degraded" is not.
- */
-function StatusPill ({ status }) {
-  const tones = {
-    ok: { color: '#4ade80', text: 'Live' },
-    pending: { color: '#fbbf24', text: 'Forecast pending' },
-    error: { color: '#f87171', text: 'API unreachable' }
-  }
-  const tone = tones[status] ?? tones.pending
-
-  return (
-    <span
-      className="hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium md:inline-flex"
-      style={{
-        background: 'var(--cb-header-pill-bg)',
-        border: '1px solid var(--cb-header-pill-border)',
-        color: 'var(--cb-header-pill-text)'
-      }}
-    >
-      <TbCircleFilled className="text-[7px]" style={{ color: tone.color }} aria-hidden />
-      {tone.text}
-    </span>
-  )
-}
-
-export default function Navbar ({ view, onView, isDark, onToggleTheme, status = 'pending', onToggleSidebar }) {
+export default function Navbar ({ view, onView, isDark, onToggleTheme, onToggleSidebar }) {
   return (
     <header
       className="relative z-30 flex h-14 shrink-0 items-center gap-3 px-3 shadow-cb"
@@ -131,7 +105,6 @@ export default function Navbar ({ view, onView, isDark, onToggleTheme, status = 
 
       <div className="flex-1" />
 
-      <StatusPill status={status} />
       <Clock />
 
       <span className="mx-1 hidden h-6 w-px sm:block" style={{ background: 'var(--cb-header-pill-border)' }} />

@@ -7,11 +7,12 @@
 // clicks in their margins are the usual way this goes wrong.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { TbAlertTriangle, TbCloudStorm } from 'react-icons/tb'
+import { TbAlertTriangle, TbCloudStorm, TbRadar2 } from 'react-icons/tb'
 
 import CariCard from '@/components/CariCard'
 import EventCard from '@/components/EventCard'
 import FeaturePanel from '@/components/FeaturePanel'
+import ForecastChartPanel from '@/components/ForecastChartPanel'
 import LayersPanel from '@/components/LayersPanel'
 import MapControls from '@/components/MapControls'
 import Navbar from '@/components/Navbar'
@@ -21,6 +22,7 @@ import TimeSlider from '@/components/TimeSlider'
 import MapView from '@/features/map/MapView'
 import { useCariChoropleth } from '@/hooks/useCariChoropleth'
 import { useContracts } from '@/hooks/useContracts'
+import { useComputedRasters } from '@/hooks/useComputedRasters'
 import { useForecast } from '@/hooks/useForecast'
 import { useRasterAvailability } from '@/hooks/useRasterAvailability'
 import { useTheme } from '@/hooks/useTheme'
@@ -49,6 +51,11 @@ const CARI_LAYER_CONFIG = [
   { id: 'pak_tehsils', kind: 'tehsil', keyField: 'tehsil_code' }
 ]
 
+// Which boundary layer maps to which forecast-chart region kind, and the property
+// that keys it. Districts join by name, tehsils by their unique code, IIOJK
+// districts by district_code (the name is not unique across the Line of Control).
+const REGION_KIND = { pak_districts: 'district', pak_tehsils: 'tehsil', iiojk_districts: 'iiojk' }
+
 function Splash ({ children }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 bg-bg p-8">
@@ -73,6 +80,8 @@ export default function App () {
   const [basemap, setBasemap] = useState(() => getStored('basemap', null))
   const [projection, setProjection] = useState('mercator')
   const [layersCollapsed, setLayersCollapsed] = useState(false)
+  // The vector layers' stacking, top-first (index 0 draws on top of the map).
+  const [layerOrder, setLayerOrder] = useState(() => getStored('layerOrder', null))
   const [panelsOpen, setPanelsOpen] = useState(true)
   const [leadIndex, setLeadIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -80,9 +89,12 @@ export default function App () {
   const [levelChoice, setLevelChoice] = useState(() => getStored('levelChoice', {}))
   const [identify, setIdentify] = useState(false)
   const [rasterSelection, setRasterSelection] = useState(null)
+  // The region whose forecast trend chart is open, or null. Set from a clicked
+  // boundary via the feature panel's "View forecast chart" button.
+  const [chartRegion, setChartRegion] = useState(null)
   // Which CARI layers are on in the Analysis view. Its own visibility set, kept
   // apart from the Map view's layers so switching tabs never disturbs either.
-  const [cariVisible, setCariVisible] = useState(() => new Set(getStored('cariVisible', ['pak_districts'])))
+  const [cariVisible, setCariVisible] = useState(() => new Set(getStored('cariVisible', [])))
   const identifyReqRef = useRef(0)
   const initialBasemapRef = useRef(null)
   // Flips true the first time visibility is seeded, so the persist effect below
@@ -152,11 +164,17 @@ export default function App () {
 
   // --------------------------------------------------------------- Analysis
   //
-  // The Analysis view colours whole administrative layers by CARI class. It runs
-  // off its own visibility set (cariVisible) and its own layer list, so the Map
-  // view is untouched, and it reads the same timeline: the choropleth and the
-  // detail card both score at the current lead.
+  // The Analysis view colours whole administrative layers by CARI class. It has
+  // its own layer list and visibility set (cariVisible), but the map draws the
+  // union of that and the ordinary layers, so a layer toggled on in any tab stays
+  // on when you switch tabs. Only its own toggle removes it. The tab still decides
+  // what a click does (a CARI card here, an attribute card elsewhere) and how the
+  // timeline is labelled.
   const analysis = view === 'analysis'
+  // Radar is a placeholder tab for now: the map stays, a note marks it as not
+  // yet wired. It scores and behaves like the Map view until the radar logic
+  // lands, so nothing else keys off it.
+  const radar = view === 'radar'
 
   const cariLayerDefs = useMemo(
     () => CARI_LAYER_CONFIG
@@ -175,14 +193,14 @@ export default function App () {
     [cariLayerDefs, cariVisible]
   )
 
-  // Poll only while the Analysis view is open, so the Map view never triggers a
-  // whole-layer scoring pass in the background.
-  const choroplethData = useCariChoropleth(analysis ? activeCariKinds : [], analysis ? activeLead : null)
+  // Poll whenever a CARI layer is toggled on, in any tab, not only in the Analysis
+  // view: the paint persists across tab switches, so the scoring that backs it has
+  // to as well. Nothing is toggled on by default, so an idle app triggers no pass.
+  const choroplethData = useCariChoropleth(activeCariKinds, activeLead)
 
-  // Per layer: the join value to class colour map the map fills with, built only
-  // for visible layers whose scoring has landed.
+  // Per layer: the join value to class colour map the map fills with, built for
+  // every toggled CARI layer whose scoring has landed, regardless of active tab.
   const cariChoropleth = useMemo(() => {
-    if (!analysis) return null
     const out = {}
     for (const c of cariLayerDefs) {
       if (!cariVisible.has(c.id)) continue
@@ -192,8 +210,8 @@ export default function App () {
       for (const f of entry.features) byKey[f.key] = cariClassList[f.classIdx]?.color ?? '#94a3b8'
       out[c.id] = { byKey, keyField: c.keyField }
     }
-    return out
-  }, [analysis, cariLayerDefs, cariVisible, choroplethData, cariClassList])
+    return Object.keys(out).length ? out : null
+  }, [cariLayerDefs, cariVisible, choroplethData, cariClassList])
 
   const cariStatus = useMemo(() => {
     const out = {}
@@ -201,7 +219,34 @@ export default function App () {
     return out
   }, [cariLayerDefs, choroplethData])
 
-  const effectiveVisible = analysis ? cariVisible : visibleLayers
+  // The map draws the union of the ordinary layers and the CARI layers, so nothing
+  // toggled on in one tab disappears when another is opened. Deduped by the Set.
+  const effectiveVisible = useMemo(
+    () => new Set([...visibleLayers, ...cariVisible]),
+    [visibleLayers, cariVisible]
+  )
+
+  // The computed rasters (per pixel CAR Index, hotspot mask) are graded on demand,
+  // so a visible one is prepared through the compute endpoint before the map draws
+  // it. The hook polls until each is ready and hands back the WRFPRS cycle and the
+  // snapped lead its tiles must resolve against, distinct from the active model's.
+  const visibleComputedIds = useMemo(
+    () => rasterLayers.filter((l) => l.source === 'computed' && effectiveVisible.has(l.id)).map((l) => l.id),
+    [rasterLayers, effectiveVisible]
+  )
+  const computedTimes = useComputedRasters(visibleComputedIds, activeLead)
+  const computingLabels = useMemo(
+    () => rasterLayers
+      .filter((l) => l.source === 'computed' && effectiveVisible.has(l.id) && computedTimes[l.id]?.status === 'computing')
+      .map((l) => l.label),
+    [rasterLayers, effectiveVisible, computedTimes]
+  )
+  const computedErrors = useMemo(
+    () => rasterLayers
+      .filter((l) => l.source === 'computed' && effectiveVisible.has(l.id) && computedTimes[l.id]?.status === 'error')
+      .map((l) => ({ label: l.label, message: computedTimes[l.id]?.message })),
+    [rasterLayers, effectiveVisible, computedTimes]
+  )
 
   const toggleCariLayer = useCallback((id) => {
     setCariVisible((cur) => {
@@ -219,6 +264,7 @@ export default function App () {
   useEffect(() => {
     setSelection(null)
     setRasterSelection(null)
+    setChartRegion(null)
     setIdentify(false)
   }, [view])
 
@@ -232,6 +278,7 @@ export default function App () {
       if (e.key !== 'Escape') return
       setSelection(null)
       setRasterSelection(null)
+      setChartRegion(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -284,6 +331,50 @@ export default function App () {
     if (!ready || !basemap) return
     if (!findBasemap(basemap)) setBasemap(null)
   }, [ready, basemap])
+
+  // Seed and heal the vector layer order once the contract is known. The contract
+  // lists layers bottom to top (national first, events last), so the map's natural
+  // top-first order is that list reversed. A saved order wins, filtered to layers
+  // that still exist, with any newly added layer placed on top.
+  useEffect(() => {
+    if (!ready) return
+    const vectorIds = contracts().layers.map((l) => l.id)
+    const fallback = [...vectorIds].reverse()
+    setLayerOrder((prev) => {
+      if (!Array.isArray(prev)) return fallback
+      const kept = prev.filter((id) => vectorIds.includes(id))
+      const added = fallback.filter((id) => !kept.includes(id))
+      return [...added, ...kept]
+    })
+  }, [ready])
+  useEffect(() => { if (layerOrder) setStored('layerOrder', layerOrder) }, [layerOrder])
+
+  // The vector layers resolved into the current top-first order, for the order
+  // dock to list and for the map to stack.
+  const orderedVectorDefs = useMemo(() => {
+    const byId = new Map(layers.map((l) => [l.id, l]))
+    const ids = layerOrder ?? [...layers.map((l) => l.id)].reverse()
+    return ids.map((id) => byId.get(id)).filter(Boolean)
+  }, [layerOrder, layers])
+
+  // The active model's temporal layers, for the forecast chart's variable picker,
+  // defaulting to whichever is currently shown on the map.
+  const chartLayers = useMemo(
+    () => rasterLayers.filter((l) => l.modelId === activeModelId && l.temporal),
+    [rasterLayers, activeModelId]
+  )
+  const chartInitialLayerId = useMemo(() => {
+    const shown = chartLayers.find((l) => visibleLayers.has(l.id))
+    return (shown ?? chartLayers[0])?.id
+  }, [chartLayers, visibleLayers])
+  const openForecastChart = useCallback((sel) => {
+    const kind = REGION_KIND[sel?.layer?.id]
+    if (!kind) return
+    const props = sel.properties || {}
+    const key = kind === 'tehsil' ? props.tehsil_code : kind === 'iiojk' ? props.district_code : props.district_name
+    const name = kind === 'tehsil' ? props.tehsil : props.district_name
+    if (key) setChartRegion({ kind, key, name: name || key })
+  }, [])
 
   // Resolved during render, not in an effect. Setting it in an effect meant the
   // map mounted with one basemap for a frame and then called setStyle once
@@ -412,24 +503,36 @@ export default function App () {
     // Only the very first open shows a loading state, since there is nothing to
     // keep yet; the swap to the new value happens atomically on arrival.
     setRasterSelection((prev) => (prev ? { ...prev, status: 'updating' } : { def, lng, lat, status: 'loading' }))
+    // A computed layer is drawn at its own WRFPRS cycle and snapped lead, not the
+    // active model's, so the pixel is read at the same time the tile shows it.
+    const computed = def.source === 'computed' ? computedTimes[def.id] : null
+    const identifyCt = computed ? computed.creationTime : (def.temporal ? forecast.creationTime : undefined)
+    const identifyLead = computed ? computed.leadHours : (def.temporal ? activeLead : undefined)
     try {
       const data = await getRasterPoint(def.id, {
         model: def.model,
-        creationTime: def.temporal ? forecast.creationTime : undefined,
-        leadHours: def.temporal ? activeLead : undefined,
+        creationTime: identifyCt,
+        leadHours: identifyLead,
         lon: lng,
         lat
       })
       if (identifyReqRef.current !== reqId) return
+      // For the CAR Index raster the pixel value is a percentage, so name the risk
+      // class it falls in (High, Very High, Extreme...) rather than leaving the card
+      // to convey meaning by colour alone. Same class boundaries as the choropleth.
+      const isRisk = contracts().bands.find((b) => b.key === def.band)?.category === 'risk'
+      const riskClass = isRisk && data.value != null
+        ? cariClassList.find((c) => data.value <= c.max) ?? cariClassList[cariClassList.length - 1]
+        : null
       setRasterSelection({
         def, lng, lat, status: 'ok',
-        value: data.value, unit: data.unit, legendTitle: data.legendTitle, leadHours: data.leadHours
+        value: data.value, unit: data.unit, legendTitle: data.legendTitle, leadHours: data.leadHours, riskClass
       })
     } catch {
       if (identifyReqRef.current !== reqId) return
       setRasterSelection({ def, lng, lat, status: 'error' })
     }
-  }, [rasterLayers, forecast.creationTime, activeLead])
+  }, [rasterLayers, forecast.creationTime, activeLead, computedTimes, cariClassList])
 
   if (contractState.status === 'loading') {
     return (
@@ -477,7 +580,6 @@ export default function App () {
         onView={setView}
         isDark={isDark}
         onToggleTheme={toggleTheme}
-        status="pending"
         onToggleSidebar={() => setPanelsOpen((v) => !v)}
       />
 
@@ -491,13 +593,61 @@ export default function App () {
           projection={projection}
           creationTime={forecast.creationTime}
           leadHours={activeLead}
+          computedTimes={computedTimes}
           identify={!analysis && identify}
           choropleth={cariChoropleth}
           selection={selection}
+          layerOrder={layerOrder}
           onIdentify={onIdentify}
           onMapReady={setMap}
           onSelectFeature={setSelection}
         />
+
+        {/* The per pixel products grade every forecast cell on demand, which takes
+            a few seconds the first time a lead is opened. A quiet chip says so, so
+            an empty map reads as working rather than broken. */}
+        {(computingLabels.length > 0 || computedErrors.length > 0) && (
+          <div className="pointer-events-none absolute left-1/2 top-4 z-20 flex -translate-x-1/2 flex-col items-center gap-1.5">
+            {computingLabels.length > 0 && (
+              <div className="flex items-center gap-2 rounded-cb border border-border bg-panel px-3.5 py-2 shadow-cb-lg">
+                <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden />
+                <span className="text-[12px] font-medium text-text">Computing {computingLabels.join(' and ')}…</span>
+              </div>
+            )}
+            {computedErrors.map((e) => (
+              <div key={e.label} className="flex max-w-[26rem] items-start gap-2 rounded-cb border border-danger-border bg-danger-soft px-3.5 py-2 shadow-cb-lg">
+                <TbAlertTriangle className="mt-[1px] shrink-0 text-[15px] text-danger" aria-hidden />
+                <span className="text-[12px] text-danger"><span className="font-semibold">{e.label}</span> {e.message}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Radar is a placeholder for now. A quiet centred note marks it as not
+            yet wired, over the live map, until the radar layer logic lands. */}
+        {radar && (
+          <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2">
+            <div className="pointer-events-auto flex items-center gap-2 rounded-cb border border-border bg-panel px-3.5 py-2 shadow-cb-lg">
+              <TbRadar2 className="shrink-0 text-[16px] text-primary" aria-hidden />
+              <span className="text-[12px] font-medium text-text-2">Radar view is coming soon</span>
+            </div>
+          </div>
+        )}
+
+        {/* Forecast trend chart for a selected boundary, floated over the lower
+            map above the timeline. Map view only, and only once a model has
+            temporal layers to chart. */}
+        {!analysis && !radar && chartRegion && chartLayers.length > 0 && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-24 z-30 flex justify-center px-3">
+            <ForecastChartPanel
+              region={chartRegion}
+              layers={chartLayers}
+              initialLayerId={chartInitialLayerId}
+              creationTime={forecast.creationTime}
+              onClose={() => setChartRegion(null)}
+            />
+          </div>
+        )}
 
         {/* Dock rails. Nothing here receives pointer events except the panels
             themselves, so the map stays draggable in every gap. */}
@@ -505,14 +655,16 @@ export default function App () {
           <div className="flex min-h-0 flex-1 items-start justify-between gap-3">
             {panelsOpen ? (
               <LayersPanel
-                layers={layers}
+                view={view}
+                layers={orderedVectorDefs}
                 rasterLayers={rasterLayers}
                 availability={availability}
-                visibleLayers={analysis ? cariVisible : visibleLayers}
-                onToggleLayer={analysis ? toggleCariLayer : toggleLayer}
+                visibleLayers={visibleLayers}
+                onToggleLayer={toggleLayer}
                 onZoomToLayer={zoomToLayer}
                 onShowAll={showAll}
-                onHideAll={() => setVisibleLayers(new Set())}
+                onHideAll={() => { setVisibleLayers(new Set()); setCariVisible(new Set()) }}
+                onReorderLayers={setLayerOrder}
                 counts={COUNTS}
                 scales={scales}
                 opacities={opacities}
@@ -523,7 +675,8 @@ export default function App () {
                 onSelectLevel={selectLevel}
                 collapsed={layersCollapsed}
                 onCollapse={() => setLayersCollapsed((v) => !v)}
-                cariMode={analysis}
+                cariVisible={cariVisible}
+                onToggleCari={toggleCariLayer}
                 cariLayers={cariLayerDefs}
                 cariClasses={cariClassList}
                 cariStatus={cariStatus}
@@ -542,7 +695,7 @@ export default function App () {
               {!analysis && selection && (
                 selection.layer?.id === 'historic_events'
                   ? <EventCard selection={selection} onClose={() => setSelection(null)} />
-                  : <FeaturePanel selection={selection} onClose={() => setSelection(null)} />
+                  : <FeaturePanel selection={selection} onClose={() => setSelection(null)} onForecastChart={openForecastChart} />
               )}
               {!analysis && rasterSelection && (
                 <RasterPanel selection={rasterSelection} onClose={() => setRasterSelection(null)} />

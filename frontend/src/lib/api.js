@@ -150,6 +150,21 @@ export const eventPhotoUrl = (id, seq) =>
 // feature carries its own id, so feature-state still works.
 export const eventsGeoJsonUrl = () => `${API_BASE}/api/events/geojson`
 
+// One temporal layer reduced over a region boundary at every published lead, for
+// the forecast chart. kind is district | tehsil | iiojk; key is the matching join
+// value; reducer is how the raster collapses over the polygon (mean, max, ...).
+export const getForecastTimeseries = (layer, kind, key, reducer, signal) =>
+  api.get('/api/raster/timeseries', { layer, kind, key, reducer }, { signal })
+
+// Prepare a computed raster (the per pixel CAR Index, the hotspot mask) for a
+// lead. These are graded on every forecast cell, too slow to do inside a tile, so
+// the API generates them on demand and this returns "ready" once the COG exists
+// or "computing" while a background pass builds it. The returned creationTime and
+// leadHours are what the tiles must resolve against: the lead is snapped to what
+// the WRFPRS grid publishes, so the caller points the layer at the snapped value.
+export const getComputeStatus = (layer, forecastHours, signal) =>
+  api.get('/api/raster/compute', { layer, forecast_hours: forecastHours }, { signal })
+
 export const getAlerts = (signal) => api.get('/api/alerts', null, { signal })
 export const getUpstreamStatus = (signal) => api.get('/api/upstream/status', null, { signal })
 
@@ -157,7 +172,7 @@ export const getUpstreamStatus = (signal) => api.get('/api/upstream/status', nul
 // host exactly like every other request.
 export const vectorTileUrl = (layerId) => `${API_BASE}/tiles/${layerId}/{z}/{x}/{y}.pbf`
 
-export const rasterTileUrl = (layerId, { band, model, creationTime, leadHours } = {}) => {
+export const rasterTileUrl = (layerId, { band, model, creationTime, leadHours, style } = {}) => {
   const params = new URLSearchParams()
   if (band) params.set('band', band)
   // The model selects which forecast run backs a temporal layer, since the same
@@ -165,6 +180,12 @@ export const rasterTileUrl = (layerId, { band, model, creationTime, leadHours } 
   if (model) params.set('model', model)
   if (creationTime) params.set('creation_time', creationTime)
   if (leadHours !== undefined && leadHours !== null) params.set('lead', String(leadHours))
+  // A cache discriminator, not read by the server: a raster tile's colours are
+  // decided server side from the band's palette, and tiles are cached for hours
+  // under this URL. Folding the palette in means changing it (this layer moving
+  // from the full ramp to the top three classes) yields a new URL, so the browser
+  // cannot keep serving the old, differently coloured tiles.
+  if (style) params.set('style', style)
   const query = params.toString()
   return `${API_BASE}/raster/${layerId}/{z}/{x}/{y}.png${query ? `?${query}` : ''}`
 }

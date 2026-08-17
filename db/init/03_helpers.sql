@@ -55,8 +55,7 @@ BEGIN
            'federalcapital','islamabad','islamabadcapitalterritory',
            'gilgitbaltistan','gb',
            'indianillegallyoccupiedjammukashmir','iiojk','jammuandkashmir',
-           'khyberpakhtunkhwa','kpk','kp',
-           'balochistan','baluchistan') THEN
+           'khyberpakhtunkhwa','kpk','kp') THEN
     RETURN 'terrain';
   END IF;
 

@@ -32,8 +32,11 @@ _jobs = asyncio.Semaphore(settings.max_concurrent_jobs)
 
 # A separate gate for batch scoring (the choropleth). It bounds concurrency the
 # same way but never rejects: a whole-layer pass deliberately queues hundreds of
-# features, which is exactly what the request-facing _Job is built to refuse.
-_batch = asyncio.Semaphore(settings.max_concurrent_jobs)
+# features, which is exactly what the request-facing _Job is built to refuse. It
+# runs wider than the request gate because a tehsil pass is 553 features each
+# clipping 13 rasters, and the reads are IO bound (rasterio releases the GIL), so
+# more of them in flight fills the wait rather than starving the CPU.
+_batch = asyncio.Semaphore(max(12, settings.max_concurrent_jobs))
 
 # The choropleth simplifies each feature before zonal reduction. The forecast
 # rasters are coarse (a PMD cell is a few hundredths of a degree, GFS coarser),
@@ -180,7 +183,8 @@ async def _raster_paths(
 
 
 async def _nearest_lead_value(
-    model: str | None, band: str, target_lead: int, geometry: dict, reducer: str, clamp
+    model: str | None, band: str, target_lead: int, geometry: dict, reducer: str, clamp,
+    cache: dict | None = None,
 ) -> tuple[float | None, int | None]:
     """Reduce a variable from the nearest lead that actually has data.
 
@@ -191,12 +195,28 @@ async def _nearest_lead_value(
     walks the band's catalogued leads outward from the target and takes the first
     one whose raster covers valid pixels. Returns the value and the lead it came
     from, so the response can say the substitution happened.
+
+    cache is a per-pass memo of which lead a band fell back to. Whether a lead is
+    empty is a domain-wide property of the source, not of one polygon, so a whole
+    layer pass resolves it once on the first feature that needs it and every other
+    feature reads straight from that lead. Only a positive result is cached, so a
+    border feature that happens to cover no data cannot poison the lookup.
     """
     cyc = await repositories.latest_cycle(model)
     if cyc is None:
         return None, None
 
     creation_time = cyc["creation_time"]
+    key = (model, band, target_lead)
+
+    if cache is not None and key in cache:
+        lead = cache[key]
+        path = await repositories.raster_path(band, model, creation_time, lead)
+        if not path:
+            return None, None
+        value = await run_in_threadpool(zonal.zonal_stat, path, geometry, reducer, clamp)
+        return (value, lead) if value is not None else (None, None)
+
     leads = await repositories.catalogued_leads(band, model, creation_time)
     candidates = sorted((lo for lo in leads if lo != target_lead), key=lambda lo: (abs(lo - target_lead), lo))
 
@@ -206,6 +226,8 @@ async def _nearest_lead_value(
             continue
         value = await run_in_threadpool(zonal.zonal_stat, path, geometry, reducer, clamp)
         if value is not None:
+            if cache is not None:
+                cache[key] = lead
             return value, lead
 
     return None, None
@@ -213,12 +235,15 @@ async def _nearest_lead_value(
 
 async def _apply_lead_fallback(
     specs: list[dict], values: dict, target_lead: int, geometry: dict,
-    reducers: dict, clamps: dict, models: dict[str, tuple[str | None, str]]
+    reducers: dict, clamps: dict, models: dict[str, tuple[str | None, str]],
+    cache: dict | None = None,
 ) -> dict[str, int]:
     """Fill any opted-in variable that came back empty at the target lead.
 
     Mutates values in place and returns which variables were sourced from which
-    lead, so the caller can surface the substitution.
+    lead, so the caller can surface the substitution. cache is passed through to
+    the nearest-lead resolver so a whole-layer pass probes the fallback lead once
+    rather than once per feature.
     """
     fallback: dict[str, int] = {}
     for spec in specs:
@@ -227,7 +252,7 @@ async def _apply_lead_fallback(
         if values.get(key) is not None or not spec.get("leadFallback") or not model:
             continue
         value, used_lead = await _nearest_lead_value(
-            model, band, target_lead, geometry, reducers[key], clamps.get(key)
+            model, band, target_lead, geometry, reducers[key], clamps.get(key), cache
         )
         if value is not None:
             values[key] = value
@@ -367,6 +392,10 @@ async def _compute_choropleth(kind: str, cycle, matrix: str | None) -> list[dict
     else:
         raise NotConfigured("score.cari_choropleth", f"unknown choropleth kind {kind!r}")
 
+    # One fallback-lead memo shared by every feature in the pass. Which lead a band
+    # falls back to is domain-wide, so this turns 553 per-feature probes into one.
+    fallback_cache: dict = {}
+
     async def score_row(row: dict) -> dict[str, Any]:
         async with _batch:
             if kind == "district":
@@ -386,7 +415,7 @@ async def _compute_choropleth(kind: str, cycle, matrix: str | None) -> list[dict
             chosen = matrix or cari_model.terrain_class(row["province"], terrain_district)
             specs, paths, reducers, clamps, models = inputs
             values = await run_in_threadpool(zonal.zonal_many, paths, geom, reducers, clamps)
-            await _apply_lead_fallback(specs, values, cycle.lead_hours, geom, reducers, clamps, models)
+            await _apply_lead_fallback(specs, values, cycle.lead_hours, geom, reducers, clamps, models, fallback_cache)
             result = cari_model.score(values, chosen)
 
         return {"key": key, "name": label, "cari": result.cari, "classIdx": result.class_idx}

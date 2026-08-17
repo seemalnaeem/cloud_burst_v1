@@ -124,7 +124,7 @@
       "label": "Wind Speed 850 hPa",
       "unit": "km/hr",
       "category": "dynamics",
-      "min": 0, "max": 100,
+      "min": 0, "max": 75,
       "palette": "continuous",
       "legendTitle": "Wind Speed 850hPa (km/hr)",
       "derivedFrom": {
@@ -221,7 +221,7 @@
       "unit": "kg/m2",
       "category": "moisture",
       "temporal": true,
-      "min": 0, "max": 70,
+      "min": 0, "max": 75,
       "palette": "viridis",
       "legendTitle": "Precipitable Water (kg/m2)"
     },
@@ -232,7 +232,7 @@
       "unit": "C",
       "category": "moisture",
       "temporal": true,
-      "min": -10, "max": 30,
+      "min": -15, "max": 32,
       "palette": "continuous",
       "legendTitle": "Dew Point (C)"
     },
@@ -254,7 +254,7 @@
       "unit": "C",
       "category": "instability",
       "temporal": true,
-      "min": -10, "max": 45,
+      "min": -15, "max": 56,
       "palette": "plasma",
       "legendTitle": "Temperature (C)"
     },
@@ -265,7 +265,7 @@
       "unit": "mm",
       "category": "rainfall",
       "temporal": true,
-      "min": 0, "max": 100,
+      "min": 0, "max": 140,
       "palette": "rainfall",
       "legendTitle": "Total Precipitation (mm)"
     },
@@ -277,7 +277,7 @@
       "unit": "mm",
       "category": "rainfall",
       "temporal": true,
-      "min": 0, "max": 50,
+      "min": 0, "max": 25,
       "palette": "rainfall",
       "legendTitle": "Hourly Precipitation (mm)"
     },
@@ -310,7 +310,7 @@
       "unit": "C",
       "category": "instability",
       "temporal": true,
-      "min": -20, "max": 30,
+      "min": 0, "max": 45,
       "palette": "plasma",
       "legendTitle": "Temperature 850hPa (C)"
     },
@@ -336,6 +336,31 @@
       "min": -60, "max": 60,
       "palette": "continuous",
       "legendTitle": "Wind V 850hPa (m/s)"
+    },
+    {
+      "key": "cari_raster",
+      "label": "CAR Index per pixel",
+      "unit": "%",
+      "category": "risk",
+      "temporal": true,
+      "computed": true,
+      "min": 0, "max": 100,
+      "palette": "hotspot",
+      "legendTitle": "CAR Index (%)",
+      "$comment": "The CAR Index graded on every forecast cell rather than reduced to a district, written by app.services.raster_score_service on the WRFPRS grid. Class breaks come from cari.json; the 0..100 percentage is rendered through the 7 class colours. Not a source band: it has no ingest, it is generated on demand and catalogued against the WRFPRS cycle."
+    },
+    {
+      "key": "hotspots",
+      "label": "Hotspot Mask",
+      "unit": "",
+      "category": "risk",
+      "temporal": true,
+      "computed": true,
+      "min": 0, "max": 1,
+      "nodata": 0,
+      "palette": "hotspot",
+      "legendTitle": "Hotspot (all 13 conditions)",
+      "$comment": "Binary mask, 1 where all 13 hotspot conditions hold on a cell, self-masked so only the true pixels render. Generated on demand on the WRFPRS grid and catalogued against its cycle. Requires precipitation_type_sfc, which is not yet ingested, so generation returns NOT_CONFIGURED naming it until that source lands."
     }
   ]
 }

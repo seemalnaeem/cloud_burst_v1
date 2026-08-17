@@ -8,6 +8,8 @@
   },
   "rainfall": {
     "kind": "continuous",
+    "transparentFirst": true,
+    "$transparentFirstNote": "The lowest bucket renders transparent, so a dry or negligibly wet cell shows the map beneath instead of a wash of pale blue. Applied by the tile colormap and mirrored in the legend so the two agree.",
     "colors": ["#c6dbef", "#6baed6", "#2171b5", "#00ff00", "#ffff00", "#ff7f00", "#ff0000", "#7a0177"]
   },
   "elevation": {
@@ -47,7 +49,14 @@
   },
   "hotspot": {
     "kind": "classed",
-    "colors": ["#ff0000"]
+    "$comment": "The Hotspot Mask renders the per pixel CAR Index but only its top three classes, everything below High transparent. Boundaries are in CAR Index percent and mirror cari.json classes 4 to 6 (High, Very High, Extreme). Colours match those classes so the map, the legend and the identify card all name the same thing.",
+    "transparentBelow": 60,
+    "colors": ["#f46d43", "#d7191c", "#7f0000"],
+    "classes": [
+      { "name": "High",      "min": 60, "max": 75,  "color": "#f46d43" },
+      { "name": "Very High", "min": 75, "max": 90,  "color": "#d7191c" },
+      { "name": "Extreme",   "min": 90, "max": 100, "color": "#7f0000" }
+    ]
   },
   "precipType": {
     "kind": "categorical",

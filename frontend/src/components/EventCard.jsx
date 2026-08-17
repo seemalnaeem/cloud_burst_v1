@@ -1,6 +1,6 @@
 // The historic event detail card, top right beside the map controls.
 //
-// Shown in the Map view when a point on the Historic Cloudburst Events layer is
+// Shown in the Map view when a point on the Historic Convective Events layer is
 // clicked. It reads the event behind the point, lays its attributes out with a
 // distinct colour per value, and plays the event's photos underneath as an auto
 // advancing carousel. Clicking a photo opens a full resolution lightbox that
@@ -29,7 +29,7 @@ const ATTRS = [
   { key: 'rainfall_mm', label: 'Rainfall', unit: 'mm', decimals: 1, color: '#0891b2' },
   { key: 'cape_j_kg', label: 'CAPE', unit: 'J/kg', decimals: 0, color: '#dc2626' },
   { key: 'relative_humidity_pct', label: 'RH 700 hPa', unit: '%', decimals: 1, color: '#059669' },
-  { key: 'precipitable_water_mm', label: 'Precipitable water', unit: 'mm', decimals: 1, color: '#7c3aed' },
+  { key: 'precipitable_water_mm', label: 'Precipitable water', unit: 'kg/m²', decimals: 1, color: '#7c3aed' },
   { key: 'vertical_velocity', label: 'Vertical velocity 700 hPa', unit: 'Pa/s', decimals: 3, color: '#db2777' },
   { key: 'elevation_m', label: 'Elevation', unit: 'm', decimals: 0, color: '#d97706' },
   { key: 'slope_deg', label: 'Slope', unit: '°', decimals: 1, color: '#65a30d' }
@@ -43,7 +43,7 @@ export default function EventCard ({ selection, onClose }) {
 
   return (
     <Panel
-      title="Historic cloudburst event"
+      title="Historic Convective Event"
       icon={TbCloudStorm}
       accent="#ef4444"
       className="max-h-[calc(100vh-7rem)] w-[320px]"
@@ -110,7 +110,7 @@ function Body ({ id, event }) {
 
 function coordLabel (e) {
   if (isMissing(e.latitude) || isMissing(e.longitude)) return null
-  return `${fmtCoord(e.latitude, 3)}, ${fmtCoord(e.longitude, 3)}`
+  return `Lat ${fmtCoord(e.latitude, 3)}, Lng ${fmtCoord(e.longitude, 3)}`
 }
 
 // The inline carousel plus the lightbox it opens. Index is shared so the two

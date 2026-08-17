@@ -4,10 +4,15 @@
 // in the order the contract lists them. No per layer markup, so a new layer
 // gets a working inspector the moment its contract entry exists.
 
-import { TbInfoCircle, TbX, TbMapPin } from 'react-icons/tb'
+import { TbInfoCircle, TbX, TbMapPin, TbChartArea } from 'react-icons/tb'
 
 import { Panel, IconButton, Chip } from './ui/Panel'
 import { LayerSwatch } from './LayerLegend'
+
+// The boundary layers a forecast trend can be charted over: districts, tehsils
+// and IIOJK districts. The chart reduces a temporal layer across the run over the
+// clicked polygon.
+const CHARTABLE = new Set(['pak_districts', 'pak_tehsils', 'iiojk_districts'])
 
 // Presentation only. Values themselves are never rounded before display
 // anywhere they might be used for a calculation.
@@ -54,7 +59,7 @@ function formatValue (key, value) {
   return String(value)
 }
 
-export default function FeaturePanel ({ selection, onClose }) {
+export default function FeaturePanel ({ selection, onClose, onForecastChart }) {
   if (!selection?.layer) return null
 
   const { layer, properties } = selection
@@ -109,6 +114,17 @@ export default function FeaturePanel ({ selection, onClose }) {
           <TbMapPin className="mt-[2px] shrink-0" aria-hidden />
           Population is not published for this district in the source boundary file.
         </p>
+      )}
+
+      {onForecastChart && CHARTABLE.has(layer.id) && (
+        <button
+          type="button"
+          onClick={() => onForecastChart(selection)}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-cb-sm border border-primary-border bg-primary-soft px-3 py-2 text-[12px] font-semibold text-primary transition-colors hover:brightness-95"
+        >
+          <TbChartArea className="text-[15px]" aria-hidden />
+          View forecast chart
+        </button>
       )}
 
       <div className="mt-3 flex flex-wrap gap-1.5">

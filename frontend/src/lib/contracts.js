@@ -63,14 +63,31 @@ export const rasterLayerById = (id) => contracts().rasterLayers.find((l) => l.id
  */
 export const rasterScale = (def) => {
   const palette = def.palette ? paletteByName(def.palette) : null
-  if (!palette?.colors) return null
+  if (!palette) return null
+
+  // A classed palette that names explicit classes (the Hotspot Mask) draws its
+  // legend as those classes, not a continuous ramp, so the blocks read High, Very
+  // High and Extreme in words rather than a 0 to 100 bar that hides which colour
+  // means what. The map, this legend and the identify card all read these.
+  if (Array.isArray(palette.classes)) {
+    return { kind: 'classes', classes: palette.classes }
+  }
+
+  if (!palette.colors) return null
 
   const band = def.band ? bandByKey(def.band) : null
   const min = def.min ?? band?.min
   const max = def.max ?? band?.max
   if (min == null || max == null) return null
 
-  return { kind: 'steps', colors: palette.colors, min, max, unit: band?.unit }
+  // Mirror the tile colormap: a transparentFirst palette renders its lowest
+  // bucket see-through on the map, so the legend shows that block as transparent
+  // too rather than a colour the map never draws.
+  const colors = palette.transparentFirst
+    ? ['transparent', ...palette.colors.slice(1)]
+    : palette.colors
+
+  return { kind: 'steps', colors, min, max, unit: band?.unit }
 }
 
 export const cariClasses = () => contracts().cari.classes

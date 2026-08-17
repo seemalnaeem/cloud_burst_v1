@@ -170,13 +170,13 @@
       "table": "obs.events",
       "tileFunction": "tiles.events",
       "sourceLayer": "events",
-      "label": "Historic Cloudburst Events",
+      "label": "Historic Convective Events",
       "labelField": "location_name",
       "color": "#ef4444",
       "legend": {
         "geometry": "point",
         "render": "circle",
-        "description": "Recorded cloudburst locations"
+        "description": "Recorded convective event locations"
       },
       "defaultVisible": false,
       "minzoom": 0,
@@ -200,51 +200,22 @@
   "$rasterBandNote": "`band` is the key in bands.json that backs the layer, and it is not always the layer id. The elevation layer is `dem` on the map and `elevation` in the band catalogue, and without this field the resolver looked for a band named `dem`, found nothing and returned a validation error rather than a tile. Layers whose band is not catalogued yet are shown in the panel but disabled, so the absence reads as pending rather than broken.",
   "rasterLayers": [
     {
-      "id": "forecast",
-      "label": "Forecast Band",
-      "source": "cog",
-      "bandDriven": true,
-      "requiresCycle": true,
-      "color": "#0ea5e9",
-      "opacity": 0.75,
-      "legend": {
-        "geometry": "raster",
-        "render": "steps",
-        "description": "Whichever forecast variable is selected, for the chosen cycle and lead"
-      }
-    },
-    {
       "id": "cari_raster",
-      "label": "CARI per pixel",
-      "source": "computed",
-      "band": "cari_raster",
-      "requiresCycle": true,
-      "palette": "cari",
-      "min": 0,
-      "max": 100,
-      "color": "#f97316",
-      "opacity": 0.7,
-      "legend": {
-        "geometry": "raster",
-        "render": "steps",
-        "description": "CARI computed per pixel on native terrain, not reduced to the district"
-      }
-    },
-    {
-      "id": "hotspots",
       "label": "Hotspot Mask",
       "source": "computed",
-      "band": "hotspots",
+      "band": "cari_raster",
+      "model": "WRFPRS",
+      "temporal": true,
       "requiresCycle": true,
       "palette": "hotspot",
       "min": 0,
-      "max": 1,
-      "color": "#dc2626",
+      "max": 100,
+      "color": "#d7191c",
       "opacity": 0.7,
       "legend": {
         "geometry": "raster",
-        "render": "steps",
-        "description": "Binary mask, every one of the 13 conditions met at once"
+        "render": "classes",
+        "description": "The CAR Index graded on every forecast cell, showing only the High, Very High and Extreme classes"
       }
     },
     {

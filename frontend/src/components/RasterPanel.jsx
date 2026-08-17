@@ -72,11 +72,22 @@ export default function RasterPanel ({ selection, onClose }) {
       </div>
 
       <dl className="flex flex-col">
+        {selection.riskClass && (
+          <Row label="Class">
+            <span
+              className="inline-flex items-center gap-1.5 rounded-cb-sm px-2 py-0.5 text-[12px] font-semibold"
+              style={{ color: selection.riskClass.textColor ?? selection.riskClass.color }}
+            >
+              <span className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ background: selection.riskClass.color }} />
+              {selection.riskClass.name}
+            </span>
+          </Row>
+        )}
         {selection.legendTitle && <Row label="Band">{selection.legendTitle}</Row>}
         {def.level ? <Row label="Level">{def.levelLabel}</Row> : null}
         {selection.leadHours != null && <Row label="Lead">{`+${selection.leadHours}h`}</Row>}
         <Row label="Coordinates">
-          <span className="font-mono text-[11.5px]">{lat.toFixed(3)}, {lng.toFixed(3)}</span>
+          <span className="font-mono text-[11.5px]">Lat {lat.toFixed(3)}, Lng {lng.toFixed(3)}</span>
         </Row>
       </dl>
 

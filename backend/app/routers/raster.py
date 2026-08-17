@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
+from typing import Literal
 
 import rasterio
 from fastapi import APIRouter, Query
@@ -16,10 +17,44 @@ from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 from app.db import repositories
+from app.services import forecast_service, raster_score_service
 from app.shared import contracts
 from app.shared.errors import NotConfigured, ValidationFailed
 
 router = APIRouter()
+
+
+@router.get("/compute")
+async def compute(
+    layer: str = Query(..., description="A computed raster layer id: cari_raster or hotspots"),
+    forecast_hours: int = Query(0, ge=-168, le=360, description="Lead hours; snapped to the WRFPRS grid"),
+) -> dict:
+    """Prepare a computed raster for a lead, generating it on demand.
+
+    The per pixel CAR Index and the hotspot mask are graded on every forecast cell,
+    which is far too slow to do inside a tile request, so they are generated once
+    per cycle and lead and catalogued. This returns "ready" when the COG exists and
+    "computing" while a background pass builds it, the same poll-until-ready shape
+    the choropleth uses. The returned creationTime and leadHours are what the tiles
+    should resolve against, since the lead is snapped to what WRFPRS publishes.
+    """
+    return await raster_score_service.compute(layer, forecast_hours)
+
+
+@router.get("/timeseries")
+async def timeseries(
+    layer: str = Query(..., description="A temporal forecast raster layer id, e.g. wrfprs_tpe"),
+    kind: Literal["district", "tehsil", "iiojk"] = Query("district"),
+    key: str = Query(..., description="district_name, tehsil_code, or IIOJK district_code"),
+    reducer: str = Query("mean", description="How the raster collapses over the polygon: mean, max, min, sum, median"),
+) -> dict:
+    """The value of one temporal layer per published lead over a region boundary.
+
+    This is what the forecast chart plots: pick a boundary and a forecast layer,
+    get the trend across the run. The reduction happens server side over the same
+    geometry the map draws, so the chart and the map agree.
+    """
+    return await forecast_service.forecast_timeseries(layer, kind, key, reducer)
 
 
 async def _resolve_raster(

@@ -20,7 +20,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   TbStack2, TbEye, TbEyeOff, TbLayersOff, TbClockPause, TbClockHour4,
-  TbChevronRight, TbChevronDown, TbCheck, TbViewfinder
+  TbChevronRight, TbChevronDown, TbCheck, TbViewfinder, TbGripVertical, TbRadar2
 } from 'react-icons/tb'
 
 import { LayerSwatch } from './LayerLegend'
@@ -84,7 +84,9 @@ function DetailScale ({ scale }) {
           <li key={c.name ?? c.label ?? c.color} className="flex items-center gap-2">
             <span className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ background: c.color, border: '1px solid rgba(16,24,40,0.14)' }} />
             <span className="min-w-0 flex-1 truncate text-[10.5px] text-text-2">{c.name ?? c.label}</span>
-            {c.max !== undefined && <span className="shrink-0 font-mono text-[9.5px] text-muted">{`<= ${c.max}`}</span>}
+            {c.min !== undefined && c.max !== undefined
+              ? <span className="shrink-0 font-mono text-[9.5px] text-muted">{`${c.min}-${c.max}%`}</span>
+              : c.max !== undefined && <span className="shrink-0 font-mono text-[9.5px] text-muted">{`<= ${c.max}`}</span>}
           </li>
         ))}
       </ul>
@@ -136,22 +138,43 @@ function RowDetail ({ description, scale, opacity, onOpacity, color }) {
   )
 }
 
-// A generic row for vector, terrain and analysis layers.
-function LayerRow ({ layer, visible, onToggle, onZoom, count, scale, opacity, onOpacity, unavailable, temporal }) {
+// A generic row for vector, terrain and analysis layers. When `reorder` is
+// supplied the row grows a drag handle and becomes a drop target, so the
+// boundary layers can be restacked from within the panel: the row's position in
+// the list is its stacking on the map, top of the list on top of the map.
+function LayerRow ({ layer, visible, onToggle, onZoom, count, scale, opacity, onOpacity, unavailable, temporal, reorder }) {
   const [open, setOpen] = useState(false)
   const disabled = Boolean(unavailable)
   const active = visible && !disabled
 
   const mark = scale?.kind === 'steps'
     ? <RampChip colors={scale.colors} />
-    : <LayerSwatch color={layer.color} render={layer.legend?.render} />
+    : scale?.kind === 'classes'
+      ? <RampChip colors={scale.classes.map((c) => c.color)} />
+      : <LayerSwatch color={layer.color} render={layer.legend?.render} />
 
   const description = layer.legend?.description
   const hasDetail = !disabled && Boolean(description || scale || onOpacity)
 
   return (
-    <li className="border-b border-border/60 last:border-b-0">
+    <li
+      className={`border-b border-border/60 last:border-b-0 ${reorder?.over ? 'bg-primary-soft' : ''} ${reorder?.dragging ? 'opacity-40' : ''}`}
+      onDragOver={reorder ? reorder.onDragOver : undefined}
+      onDrop={reorder ? reorder.onDrop : undefined}
+    >
       <div className={`flex h-9 items-center gap-1.5 px-2 ${disabled ? 'opacity-55' : ''}`}>
+        {reorder && (
+          <span
+            draggable
+            onDragStart={reorder.onDragStart}
+            onDragEnd={reorder.onDragEnd}
+            title="Drag to reorder"
+            aria-label={`Reorder ${layer.label}`}
+            className="grid h-5 w-3.5 shrink-0 cursor-grab place-items-center text-muted transition-colors hover:text-text active:cursor-grabbing"
+          >
+            <TbGripVertical className="text-[13px]" aria-hidden />
+          </span>
+        )}
         {hasDetail ? (
           <button
             type="button"
@@ -482,7 +505,13 @@ function CariLayerRow ({ layer, visible, onToggle, classes, status }) {
           {layer.label}
         </span>
         {visible && status === 'computing' && (
-          <span className="shrink-0 animate-pulse text-[9.5px] font-medium text-muted">scoring…</span>
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-panel-2 px-2 py-[3px] text-[10.5px] font-semibold text-text">
+            {/* A CSS ring spinner: a full border in the current (dark) text colour
+                with the top edge cut out, spun continuously. Reads clearly as work
+                in progress, unlike the faint pulsing text it replaces. */}
+            <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />
+            Scoring
+          </span>
         )}
         <Toggle checked={visible} onChange={onToggle} color={layer.color} label={`Toggle ${layer.label}`} />
       </div>
@@ -537,6 +566,7 @@ export default function LayersPanel ({
   onZoomToLayer,
   onShowAll,
   onHideAll,
+  onReorderLayers,
   counts = {},
   scales = {},
   opacities = {},
@@ -547,48 +577,36 @@ export default function LayersPanel ({
   onSelectLevel,
   collapsed,
   onCollapse,
-  cariMode = false,
+  view = 'map',
+  cariVisible,
+  onToggleCari,
   cariLayers = [],
   cariClasses = [],
   cariStatus = {}
 }) {
-  // Analysis view: the panel is a short list of CARI layers, each carrying the
-  // class legend that reads its choropleth. Everything else, the boundary,
-  // terrain and forecast sections, belongs to the Map view and is set aside.
-  if (cariMode) {
-    const visibleCount = cariLayers.filter((l) => visibleLayers.has(l.id)).length
-    return (
-      <Panel
-        title="CARI Layers"
-        icon={TbStack2}
-        collapsed={collapsed}
-        onToggle={onCollapse}
-        className="max-h-[calc(100vh-8.5rem)] w-[288px]"
-        footer={
-          <div className="flex items-center justify-between text-[10.5px] text-muted">
-            <span>{visibleCount} of {cariLayers.length} visible</span>
-            <span className="font-mono">Convective Activity Risk</span>
-          </div>
-        }
-      >
-        <ul>
-          <Section label="Administrative units" count={cariLayers.length}>
-            {cariLayers.map((l) => (
-              <CariLayerRow
-                key={l.id}
-                layer={l}
-                visible={visibleLayers.has(l.id)}
-                onToggle={() => onToggleLayer(l.id)}
-                classes={cariClasses}
-                status={cariStatus[l.id]}
-              />
-            ))}
-          </Section>
-        </ul>
-      </Panel>
-    )
+  // Drag reorder for the boundary layers, in the Boundaries section below. The
+  // list order is the map stacking, so dropping one row onto another moves that
+  // layer in the stack. The handlers are handed to each boundary row.
+  const [dragIndex, setDragIndex] = useState(null)
+  const [overIndex, setOverIndex] = useState(null)
+  const dropReorder = (to) => {
+    const from = dragIndex
+    setDragIndex(null)
+    setOverIndex(null)
+    if (!onReorderLayers || from == null || to == null || from === to) return
+    const ids = layers.map((l) => l.id)
+    const [moved] = ids.splice(from, 1)
+    ids.splice(to, 0, moved)
+    onReorderLayers(ids)
   }
-
+  const reorderFor = (i) => (onReorderLayers ? {
+    dragging: dragIndex === i,
+    over: overIndex === i && dragIndex !== null && dragIndex !== i,
+    onDragStart: () => setDragIndex(i),
+    onDragOver: (e) => { e.preventDefault(); setOverIndex(i) },
+    onDrop: (e) => { e.preventDefault(); dropReorder(i) },
+    onDragEnd: () => { setDragIndex(null); setOverIndex(null) }
+  } : undefined)
   // Split the raster layers into their behavioural groups. A forecast layer is
   // any that names a model (PMD or GFS); those are grouped under the model
   // selector. The rest are terrain (static) or analysis (computed).
@@ -626,7 +644,7 @@ export default function LayersPanel ({
     list.sort((a, b) => (a.level === 0 ? -1 : b.level === 0 ? 1 : b.level - a.level))
   }
 
-  const genericRow = (layer, withOpacity, temporal) => {
+  const genericRow = (layer, withOpacity, temporal, reorder) => {
     const state = availability[layer.id]
     return (
       <LayerRow
@@ -641,28 +659,40 @@ export default function LayersPanel ({
         onOpacity={withOpacity ? (v) => onOpacity(layer.id, v) : undefined}
         unavailable={state && !state.ok ? state.reason : null}
         temporal={temporal}
+        reorder={reorder}
       />
     )
   }
 
-  const empty = layers.length === 0 && rasterLayers.length === 0
+  // Each tab shows only its own layer groups: the Map tab the boundaries and
+  // terrain, the Forecast tab the model selector and its fields, the Analysis tab
+  // the CARI choropleth units and the per pixel products. The map itself always
+  // draws the union of everything toggled on, so a layer switched on here stays on
+  // when another tab is opened; only its own toggle takes it off.
+  const TITLES = { map: 'Layers', forecast: 'Forecast', analysis: 'Analysis', radar: 'Radar' }
+  const hasBody =
+    (view === 'map' && (layers.length > 0 || terrainLayers.length > 0)) ||
+    (view === 'forecast' && models.length > 0) ||
+    (view === 'analysis' && (cariLayers.length > 0 || analysisLayers.length > 0))
 
   return (
     <Panel
-      title="Layers"
+      title={TITLES[view] ?? 'Layers'}
       icon={TbStack2}
       collapsed={collapsed}
       onToggle={onCollapse}
       className="max-h-[calc(100vh-8.5rem)] w-[288px]"
-      actions={
-        <IconButton
-          icon={allVisible ? TbEye : TbEyeOff}
-          label={allVisible ? 'Hide all layers' : 'Show all layers'}
-          size="sm"
-          tone="ghost"
-          onClick={allVisible ? onHideAll : onShowAll}
-        />
-      }
+      actions={view === 'map'
+        ? (
+          <IconButton
+            icon={allVisible ? TbEye : TbEyeOff}
+            label={allVisible ? 'Hide all layers' : 'Show all layers'}
+            size="sm"
+            tone="ghost"
+            onClick={allVisible ? onHideAll : onShowAll}
+          />
+          )
+        : undefined}
       footer={
         <div className="flex items-center justify-between text-[10.5px] text-muted">
           <span>{visibleCount} of {toggleable.length} visible</span>
@@ -670,32 +700,54 @@ export default function LayersPanel ({
         </div>
       }
     >
-      {empty ? (
+      {view === 'radar' ? (
+        <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+          <TbRadar2 className="text-2xl text-muted" aria-hidden />
+          <p className="text-[12px] text-muted">Radar controls are coming soon.</p>
+        </div>
+      ) : !hasBody ? (
         <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
           <TbLayersOff className="text-2xl text-muted" aria-hidden />
-          <p className="text-[12px] text-muted">No layers are published yet.</p>
+          <p className="text-[12px] text-muted">
+            {view === 'forecast' ? 'No forecast models are published yet.' : 'No layers are published yet.'}
+          </p>
         </div>
       ) : (
         <ul>
-          {layers.length > 0 && (
+          {view === 'map' && layers.length > 0 && (
             <Section label="Boundaries" count={layers.length}>
-              {layers.map((l) => genericRow(l, false, false))}
+              {layers.map((l, i) => genericRow(l, false, false, reorderFor(i)))}
             </Section>
           )}
 
-          {terrainLayers.length > 0 && (
+          {view === 'map' && terrainLayers.length > 0 && (
             <Section label="Terrain" count={terrainLayers.length}>
               {terrainLayers.map((l) => genericRow(l, true, false))}
             </Section>
           )}
 
-          {analysisLayers.length > 0 && (
-            <Section label="Analysis" count={analysisLayers.length} defaultOpen={false}>
+          {view === 'analysis' && cariLayers.length > 0 && (
+            <Section label="Administrative units" count={cariLayers.length}>
+              {cariLayers.map((l) => (
+                <CariLayerRow
+                  key={l.id}
+                  layer={l}
+                  visible={Boolean(cariVisible?.has(l.id))}
+                  onToggle={() => onToggleCari(l.id)}
+                  classes={cariClasses}
+                  status={cariStatus[l.id]}
+                />
+              ))}
+            </Section>
+          )}
+
+          {view === 'analysis' && analysisLayers.length > 0 && (
+            <Section label="Per pixel" count={analysisLayers.length}>
               {analysisLayers.map((l) => genericRow(l, true, Boolean(l.temporal)))}
             </Section>
           )}
 
-          {models.length > 0 && (
+          {view === 'forecast' && models.length > 0 && (
             <Section label="Forecast models" count={elementOrder.length}>
               <li className="border-b border-border/60 px-2 py-2">
                 <ModelSelect

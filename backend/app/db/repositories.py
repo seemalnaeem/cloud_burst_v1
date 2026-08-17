@@ -142,6 +142,27 @@ async def tehsil_geometry(tehsil_code: str, tolerance_deg: float | None = None) 
     }
 
 
+async def region_geometry(kind: str, key: str, tolerance_deg: float | None = 0.01) -> dict[str, Any] | None:
+    """Geometry for a district, tehsil or IIOJK district, for the forecast chart.
+
+    A district is keyed by district_name, a tehsil by tehsil_code, and an IIOJK
+    district by district_code within province IJK. Simplified a touch by default,
+    which is harmless against the coarse forecast grids the series reduces over and
+    keeps the zonal clip quick.
+    """
+    geom = "geom" if tolerance_deg is None else f"ST_SimplifyPreserveTopology(geom, {float(tolerance_deg)})"
+    if kind == "tehsil":
+        sql = f"SELECT tehsil AS name, ST_AsGeoJSON({geom})::text AS g FROM geo.tehsils WHERE tehsil_code = $1"
+    elif kind == "iiojk":
+        sql = f"SELECT district_name AS name, ST_AsGeoJSON({geom})::text AS g FROM geo.districts WHERE district_code = $1 AND province_code = 'IJK'"
+    else:
+        sql = f"SELECT district_name AS name, ST_AsGeoJSON({geom})::text AS g FROM geo.districts WHERE district_name = $1"
+    row = await pool.fetchrow(sql, key)
+    if row is None:
+        return None
+    return {"name": row["name"], "geometry": json.loads(row["g"])}
+
+
 # A fixed allowlist of layer id to source, so the extent query never interpolates
 # anything a caller supplied. This is the "map a dynamic table name through a
 # fixed allowlist" rule from the security guardrail made concrete. A tuple is
@@ -177,6 +198,71 @@ async def layer_extent(layer_id: str) -> dict[str, float] | None:
     if not row or row["west"] is None:
         return None
     return {"west": row["west"], "south": row["south"], "east": row["east"], "north": row["north"]}
+
+
+async def districts_for_matrix(tolerance_deg: float = 0.005) -> list[dict[str, Any]]:
+    """Every district as (name, province, geometry), for the terrain matrix raster.
+
+    The per pixel CAR Index picks the terrain or lowlands thresholds cell by cell,
+    the same choice terrain_class makes per district, so the generator needs each
+    district's province and geometry to burn that choice onto the grid. Simplified
+    a touch by default: the mask is rasterized to a roughly 5 km grid, so a
+    hundredth-of-a-degree of boundary detail cannot land in a different cell, and
+    dropping the full 6.7-million-vertex resolution keeps the rasterization quick.
+    """
+    rows = await pool.fetch(
+        f"""
+        SELECT district_name, province,
+               ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom, {float(tolerance_deg)}))::text AS geometry
+        FROM geo.districts
+        """
+    )
+    return [
+        {"district_name": r["district_name"], "province": r["province"], "geometry": json.loads(r["geometry"])}
+        for r in rows
+    ]
+
+
+async def catalog_computed_raster(
+    band_key: str,
+    model: str,
+    creation_time,
+    lead_hours: int,
+    path: str,
+    *,
+    unit: str | None,
+    min_value: float | None,
+    max_value: float | None,
+    nodata: float | None,
+) -> None:
+    """Register a generated COG so the tile route can resolve it.
+
+    Computed rasters (the per pixel CAR Index, the hotspot mask) are catalogued
+    against the WRFPRS cycle and lead they were generated for, under the WRFPRS
+    model, which is what the foreign key onto wx.cycles requires and what lets the
+    same resolve path that serves an ingested band serve these too. Replace rather
+    than upsert: the unique index is over an expression, so a delete then insert is
+    both simpler and correct when a lead is regenerated.
+    """
+    async with pool.get_pool().acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                DELETE FROM wx.raster_catalog
+                WHERE band_key = $1 AND model = $2 AND creation_time = $3 AND lead_hours = $4
+                """,
+                band_key, model, creation_time, lead_hours,
+            )
+            await conn.execute(
+                """
+                INSERT INTO wx.raster_catalog
+                  (band_key, model, creation_time, lead_hours, path, unit,
+                   min_value, max_value, nodata, is_static)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false)
+                """,
+                band_key, model, creation_time, lead_hours, path, unit,
+                min_value, max_value, nodata,
+            )
 
 
 async def latest_cycle(model: str | None = None) -> dict[str, Any] | None:

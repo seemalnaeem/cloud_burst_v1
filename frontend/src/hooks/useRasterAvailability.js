@@ -45,9 +45,14 @@ export function useRasterAvailability (rasterLayers) {
   for (const layer of rasterLayers ?? []) {
     const entry = layer.band ? byKey.get(catKey(layer.band, layer.model)) : null
 
-    if (layer.bandDriven) {
+    if (layer.bandDriven || layer.source === 'computed') {
       // The forecast layer has no single band, it takes whichever one is
-      // selected, so it is available once any cycle driven band is catalogued.
+      // selected; a computed layer (per pixel CAR Index, hotspot mask) has no
+      // ingest at all and is generated on demand from a cycle. Both are available
+      // once any cycle driven band is catalogued, not once their own output
+      // exists, so toggling one is what triggers the pass that fills it in. A
+      // computed product that cannot actually be built, the hotspot mask without
+      // precipitation type, reports that when the compute endpoint is called.
       const anyCycle = (bands ?? []).some((b) => !b.is_static && Number(b.cycles) > 0)
       availability[layer.id] = anyCycle
         ? { ok: true }

@@ -124,7 +124,7 @@ tilesRouter.get('/raster/:layer/:z/:x/:y.png', async (req, res, next) => {
     } else if (resolved.min != null && resolved.max != null) {
       tileUrl.searchParams.set('rescale', `${resolved.min},${resolved.max}`)
       if (palette) {
-        tileUrl.searchParams.set('colormap', JSON.stringify(buildColormap(palette)))
+        tileUrl.searchParams.set('colormap', JSON.stringify(buildColormap(palette, resolved.min, resolved.max)))
       }
     }
 
@@ -172,21 +172,52 @@ tilesRouter.get('/raster/:layer/:z/:x/:y.png', async (req, res, next) => {
  * range into the same number of blocks, so the nth colour on the map and the nth
  * block in the legend describe the same interval.
  */
-function buildColormap (palette) {
+function buildColormap (palette, min, max) {
   if (palette.kind === 'categorical') {
     return Object.fromEntries(palette.entries.map((e) => [e.code, hexToRgba(e.color)]))
+  }
+
+  // A classed palette that declares explicit class intervals in data units, the
+  // Hotspot Mask being the one: it renders the CAR Index percentage but shows only
+  // its top classes and leaves the rest transparent. The boundaries are exact
+  // percents, not equal buckets, so they are converted to the 0..255 space TiTiler
+  // colours in (rescale runs first) rather than divided evenly. Below the first
+  // class is a transparent interval, so a cell under the threshold shows the map.
+  if (Array.isArray(palette.classes)) {
+    const lo = min ?? 0
+    const hi = max ?? 100
+    const to255 = (v) => Math.round(((v - lo) / (hi - lo)) * 255)
+    const out = []
+    if (palette.transparentBelow != null) {
+      out.push([[0, to255(palette.transparentBelow)], [0, 0, 0, 0]])
+    }
+    palette.classes.forEach((c, i) => {
+      const start = to255(c.min)
+      // The last class closes at 256 for the same half-open reason as below, so the
+      // single brightest value is not left uncoloured.
+      const end = i === palette.classes.length - 1 ? 256 : to255(c.max)
+      out.push([[start, end], hexToRgba(c.color)])
+    })
+    return out
   }
 
   const colors = palette.colors
   const span = 256 / colors.length
 
-  return colors.map((color, i) => [
-    // The last interval closes at 256 rather than 255. The comparison is a half
-    // open [start, stop), so stopping at 255 would leave the single brightest
-    // value uncoloured: one transparent pixel exactly on the highest peaks.
-    [Math.round(i * span), i === colors.length - 1 ? 256 : Math.round((i + 1) * span)],
-    hexToRgba(color)
-  ])
+  return colors.map((color, i) => {
+    const rgba = hexToRgba(color)
+    // transparentFirst makes the lowest bucket see-through, so a dry or barely
+    // wet cell shows the map beneath rather than a wash of the palette's palest
+    // colour. Used by the rainfall palette. The legend mirrors it.
+    if (i === 0 && palette.transparentFirst) rgba[3] = 0
+    return [
+      // The last interval closes at 256 rather than 255. The comparison is a half
+      // open [start, stop), so stopping at 255 would leave the single brightest
+      // value uncoloured: one transparent pixel exactly on the highest peaks.
+      [Math.round(i * span), i === colors.length - 1 ? 256 : Math.round((i + 1) * span)],
+      rgba
+    ]
+  })
 }
 
 const hexToRgba = (hex) => {

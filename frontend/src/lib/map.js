@@ -59,16 +59,16 @@ function fillColorExpr (baseColor) {
   ]
 }
 
-// The fill opacity for a polygon layer, as a feature-state expression. A selected
-// polygon takes a readable maroon wash; hover is a lighter tint of the layer's
-// own colour. Shared by addVectorLayer and resetPaint so a return from the
-// choropleth restores the same interactive behaviour rather than a dead constant.
-function fillOpacityExpr (base) {
+// The fill opacity for a polygon layer, as a feature-state expression. Polygon
+// layers carry no fill of their own: the boundary is the outline, and the fill is
+// transparent until the polygon is selected, when it takes the red selection
+// wash. Hover is shown on the outline, not with a fill. Shared by addVectorLayer
+// and resetPaint so a return from the choropleth restores the same behaviour.
+function fillOpacityExpr () {
   return [
     'case',
     ['boolean', ['feature-state', 'selected'], false], SELECT_FILL_MAP,
-    ['boolean', ['feature-state', 'hover'], false], Math.min(0.85, base + 0.28),
-    base
+    0
   ]
 }
 
@@ -172,7 +172,7 @@ export function addVectorLayer (map, def, visible) {
         // without re-rendering the source, which on the districts is the
         // difference between smooth and visibly stuttering.
         'fill-color': fillColorExpr(def.color),
-        'fill-opacity': fillOpacityExpr(paint.fillOpacity ?? 0.12)
+        'fill-opacity': fillOpacityExpr()
       }
     })
   }
@@ -238,6 +238,31 @@ export function raiseSelectionOutlines (map) {
     .forEach((l) => map.moveLayer(l.id))
 }
 
+/**
+ * Reorder the vector layers on the map from a top-first list of contract defs.
+ *
+ * The first def is drawn highest, so the top of the order dock is the top of the
+ * map. Moving each layer's base parts to the very top from the bottom of the list
+ * upward leaves the first one on top; rasters are never moved so they stay beneath
+ * the vectors, and the basemap, which owns the bottom of the style, stays there.
+ * Selection outlines are lifted back above everything at the end.
+ */
+export function applyLayerOrder (map, orderedDefsTopFirst) {
+  if (!map || !map.getStyle()) return
+  for (let i = orderedDefsTopFirst.length - 1; i >= 0; i--) {
+    const def = orderedDefsTopFirst[i]
+    if (!def) continue
+    if (def.geometryType === 'point') {
+      if (map.getLayer(circleId(def.id))) map.moveLayer(circleId(def.id))
+    } else {
+      // Fill first, then line, so the outline stays above the fill within a layer.
+      if (map.getLayer(fillId(def.id))) map.moveLayer(fillId(def.id))
+      if (map.getLayer(lineId(def.id))) map.moveLayer(lineId(def.id))
+    }
+  }
+  raiseSelectionOutlines(map)
+}
+
 export const rasterId = (layerId) => `raster-${layerId}`
 
 /**
@@ -256,7 +281,9 @@ export function rasterTemplate (def, { band, creationTime, leadHours } = {}) {
     // against the right run without the caller having to thread it.
     model: def.model,
     creationTime: def.temporal ? creationTime : undefined,
-    leadHours: def.temporal ? leadHours : undefined
+    leadHours: def.temporal ? leadHours : undefined,
+    // Cache discriminator so a palette change is not masked by cached tiles.
+    style: def.palette
   })
 }
 
@@ -398,7 +425,7 @@ export function resetPaint (map, def) {
   // Restore the feature-state expressions, not flat values, so hover and the
   // maroon selection keep working after a return from the Analysis choropleth.
   map.setPaintProperty(id, 'fill-color', fillColorExpr(def.color))
-  map.setPaintProperty(id, 'fill-opacity', fillOpacityExpr(def.paint?.fillOpacity ?? 0.12))
+  map.setPaintProperty(id, 'fill-opacity', fillOpacityExpr())
 }
 
 export function fitToBounds (map, bounds, padding = 48) {

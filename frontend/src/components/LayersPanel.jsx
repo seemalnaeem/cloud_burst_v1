@@ -578,8 +578,6 @@ export default function LayersPanel ({
   collapsed,
   onCollapse,
   view = 'map',
-  cariVisible,
-  onToggleCari,
   cariLayers = [],
   cariClasses = [],
   cariStatus = {}
@@ -732,8 +730,8 @@ export default function LayersPanel ({
                 <CariLayerRow
                   key={l.id}
                   layer={l}
-                  visible={Boolean(cariVisible?.has(l.id))}
-                  onToggle={() => onToggleCari(l.id)}
+                  visible={visibleLayers.has(l.id)}
+                  onToggle={() => onToggleLayer(l.id)}
                   classes={cariClasses}
                   status={cariStatus[l.id]}
                 />

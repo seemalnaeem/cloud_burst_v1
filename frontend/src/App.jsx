@@ -94,7 +94,6 @@ export default function App () {
   const [chartRegion, setChartRegion] = useState(null)
   // Which CARI layers are on in the Analysis view. Its own visibility set, kept
   // apart from the Map view's layers so switching tabs never disturbs either.
-  const [cariVisible, setCariVisible] = useState(() => new Set(getStored('cariVisible', [])))
   const identifyReqRef = useRef(0)
   const initialBasemapRef = useRef(null)
   // Flips true the first time visibility is seeded, so the persist effect below
@@ -164,12 +163,12 @@ export default function App () {
 
   // --------------------------------------------------------------- Analysis
   //
-  // The Analysis view colours whole administrative layers by CARI class. It has
-  // its own layer list and visibility set (cariVisible), but the map draws the
-  // union of that and the ordinary layers, so a layer toggled on in any tab stays
-  // on when you switch tabs. Only its own toggle removes it. The tab still decides
-  // what a click does (a CARI card here, an attribute card elsewhere) and how the
-  // timeline is labelled.
+  // The Analysis view colours administrative layers by CARI class. Districts and
+  // tehsils are one layer each with a single visibility toggle shared across
+  // tabs, so they never disappear on a tab switch; only the toggle removes them.
+  // The tab decides how they are drawn (a plain boundary in Map, the choropleth
+  // here), what a click does (a CARI card here, an attribute card elsewhere) and
+  // how the timeline is labelled.
   const analysis = view === 'analysis'
   // Radar is a placeholder tab for now: the map stays, a note marks it as not
   // yet wired. It scores and behaves like the Map view until the radar logic
@@ -188,22 +187,28 @@ export default function App () {
 
   const cariClassList = useMemo(() => (ready ? cariClasses() : []), [ready])
 
+  // Districts and tehsils are a single layer each, with one visibility toggle
+  // shared by the Map and Analysis tabs. The difference is only how they are
+  // drawn: a plain boundary everywhere, coloured by CARI class in the Analysis
+  // tab. So the scoring keys off the same visibleLayers set the Map tab toggles,
+  // and only the paint is gated on the tab.
   const activeCariKinds = useMemo(
-    () => cariLayerDefs.filter((c) => cariVisible.has(c.id)).map((c) => c.kind),
-    [cariLayerDefs, cariVisible]
+    () => cariLayerDefs.filter((c) => visibleLayers.has(c.id)).map((c) => c.kind),
+    [cariLayerDefs, visibleLayers]
   )
 
-  // Poll whenever a CARI layer is toggled on, in any tab, not only in the Analysis
-  // view: the paint persists across tab switches, so the scoring that backs it has
-  // to as well. Nothing is toggled on by default, so an idle app triggers no pass.
-  const choroplethData = useCariChoropleth(activeCariKinds, activeLead)
+  // Score only while the Analysis tab is open: that is the only place the
+  // choropleth is drawn, so the Map tab never triggers a whole-layer pass. The
+  // paint resets to the plain boundary when the tab is left.
+  const choroplethData = useCariChoropleth(analysis ? activeCariKinds : [], analysis ? activeLead : null)
 
-  // Per layer: the join value to class colour map the map fills with, built for
-  // every toggled CARI layer whose scoring has landed, regardless of active tab.
+  // Per layer: the join value to class colour map the map fills with, built in the
+  // Analysis tab for every visible administrative layer whose scoring has landed.
   const cariChoropleth = useMemo(() => {
+    if (!analysis) return null
     const out = {}
     for (const c of cariLayerDefs) {
-      if (!cariVisible.has(c.id)) continue
+      if (!visibleLayers.has(c.id)) continue
       const entry = choroplethData[c.kind]
       if (entry?.status !== 'ready') continue
       const byKey = {}
@@ -211,7 +216,7 @@ export default function App () {
       out[c.id] = { byKey, keyField: c.keyField }
     }
     return Object.keys(out).length ? out : null
-  }, [cariLayerDefs, cariVisible, choroplethData, cariClassList])
+  }, [analysis, cariLayerDefs, visibleLayers, choroplethData, cariClassList])
 
   const cariStatus = useMemo(() => {
     const out = {}
@@ -219,12 +224,9 @@ export default function App () {
     return out
   }, [cariLayerDefs, choroplethData])
 
-  // The map draws the union of the ordinary layers and the CARI layers, so nothing
-  // toggled on in one tab disappears when another is opened. Deduped by the Set.
-  const effectiveVisible = useMemo(
-    () => new Set([...visibleLayers, ...cariVisible]),
-    [visibleLayers, cariVisible]
-  )
+  // One visibility set for everything, so switching tabs never hides a layer:
+  // toggling is the only thing that does.
+  const effectiveVisible = visibleLayers
 
   // The computed rasters (per pixel CAR Index, hotspot mask) are graded on demand,
   // so a visible one is prepared through the compute endpoint before the map draws
@@ -247,17 +249,6 @@ export default function App () {
       .map((l) => ({ label: l.label, message: computedTimes[l.id]?.message })),
     [rasterLayers, effectiveVisible, computedTimes]
   )
-
-  const toggleCariLayer = useCallback((id) => {
-    setCariVisible((cur) => {
-      const next = new Set(cur)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }, [])
-
-  useEffect(() => { setStored('cariVisible', [...cariVisible]) }, [cariVisible])
 
   // A view switch clears whatever was picked in the other view, so a district
   // popup does not linger into Analysis and a CARI card does not linger back.
@@ -663,7 +654,7 @@ export default function App () {
                 onToggleLayer={toggleLayer}
                 onZoomToLayer={zoomToLayer}
                 onShowAll={showAll}
-                onHideAll={() => { setVisibleLayers(new Set()); setCariVisible(new Set()) }}
+                onHideAll={() => setVisibleLayers(new Set())}
                 onReorderLayers={setLayerOrder}
                 counts={COUNTS}
                 scales={scales}
@@ -675,8 +666,6 @@ export default function App () {
                 onSelectLevel={selectLevel}
                 collapsed={layersCollapsed}
                 onCollapse={() => setLayersCollapsed((v) => !v)}
-                cariVisible={cariVisible}
-                onToggleCari={toggleCariLayer}
                 cariLayers={cariLayerDefs}
                 cariClasses={cariClassList}
                 cariStatus={cariStatus}

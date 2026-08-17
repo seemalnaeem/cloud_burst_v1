@@ -142,8 +142,8 @@ function RowDetail ({ description, scale, opacity, onOpacity, color }) {
 // supplied the row grows a drag handle and becomes a drop target, so the
 // boundary layers can be restacked from within the panel: the row's position in
 // the list is its stacking on the map, top of the list on top of the map.
-function LayerRow ({ layer, visible, onToggle, onZoom, count, scale, opacity, onOpacity, unavailable, temporal, reorder }) {
-  const [open, setOpen] = useState(false)
+function LayerRow ({ layer, visible, onToggle, onZoom, count, scale, opacity, onOpacity, unavailable, temporal, reorder, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen)
   const disabled = Boolean(unavailable)
   const active = visible && !disabled
 
@@ -642,7 +642,7 @@ export default function LayersPanel ({
     list.sort((a, b) => (a.level === 0 ? -1 : b.level === 0 ? 1 : b.level - a.level))
   }
 
-  const genericRow = (layer, withOpacity, temporal, reorder) => {
+  const genericRow = (layer, withOpacity, temporal, reorder, defaultOpen = false) => {
     const state = availability[layer.id]
     return (
       <LayerRow
@@ -658,6 +658,7 @@ export default function LayersPanel ({
         unavailable={state && !state.ok ? state.reason : null}
         temporal={temporal}
         reorder={reorder}
+        defaultOpen={defaultOpen}
       />
     )
   }
@@ -741,7 +742,10 @@ export default function LayersPanel ({
 
           {view === 'analysis' && analysisLayers.length > 0 && (
             <Section label="Per pixel" count={analysisLayers.length}>
-              {analysisLayers.map((l) => genericRow(l, true, Boolean(l.temporal)))}
+              {/* Detail open by default here: the Hotspot Mask legend names the
+                  three classes, which is the point of the layer, so it should not
+                  hide behind a chevron in the Analysis tab. */}
+              {analysisLayers.map((l) => genericRow(l, true, Boolean(l.temporal), undefined, true))}
             </Section>
           )}
 

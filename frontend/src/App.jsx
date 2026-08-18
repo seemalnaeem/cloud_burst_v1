@@ -152,7 +152,16 @@ export default function App () {
   // lands a cycle, and on the active model, so switching model reloads its run.
   const availabilitySignal = Object.values(availability).filter((a) => a?.ok).length
   const forecast = useForecast(activeModel?.model ?? null, availabilitySignal)
-  const leads = forecast.leads
+  const modelLeads = forecast.leads
+  // CARI scores on the 3 hour grid: its wind (GFS) and precipitable water
+  // (GRAPES) inputs are 3-hourly, so a class cannot change faster than that.
+  // WRFPRS happens to publish hourly, which made the Analysis slider step three
+  // identical slots per real change. So in the Analysis view the slider steps the
+  // 3 hour grid (leads that are multiples of 3, exactly the distinct scoring
+  // leads); the Forecast view keeps the model's own leads, hourly where it has
+  // them.
+  const analysisLeads = useMemo(() => modelLeads.filter((h) => h % 3 === 0), [modelLeads])
+  const leads = view === 'analysis' ? analysisLeads : modelLeads
   const activeLead = leads.length ? leads[Math.min(leadIndex, leads.length - 1)] : null
 
   // Temporal layers currently shown for the active model, for the slider to name

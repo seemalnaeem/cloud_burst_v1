@@ -612,16 +612,25 @@ _warm_tasks: dict[str, asyncio.Task] = {}
 
 
 async def _warm_targets() -> tuple[Any, list[int]]:
-    """The headline cycle and its published leads, the set a warm-up covers.
+    """The headline cycle and the distinct scoring leads a warm-up covers.
 
-    The choropleth snaps any requested hour to one of these leads and caches
-    under it, so warming every published lead makes every slider position a hit.
+    The choropleth snaps any requested hour onto the 3 hour scoring grid and
+    caches under the snapped lead, so the set worth warming is the distinct
+    snapped leads, not the raw published list. A cycle publishes hourly (103
+    leads) while scoring lands on the grid (35 leads); counting the hourly list
+    pinned the progress readout at 35/103 forever, since the 68 off-grid hours
+    can never be cached under their own number. Warming these snapped leads makes
+    every slider position, on or off the grid, a cache hit.
     """
     model = await _headline_model()
     cyc = await repositories.latest_cycle(model)
     if cyc is None:
         return None, []
-    leads = sorted({int(lead) for lead in (cyc["published_leads"] or [])})
+    published = sorted({int(lead) for lead in (cyc["published_leads"] or [])})
+    leads = sorted({
+        timeutil.snap_to_published(timeutil.snap_to_grid(lead), published)
+        for lead in published
+    })
     return cyc["creation_time"], leads
 
 
@@ -639,17 +648,17 @@ async def _warm_body(kind: str) -> None:
         return
 
     for lead in leads:
-        if await repositories.cached_choropleth(kind, creation_time, lead):
-            continue
-        cycle, _model = await _resolve(lead)
-        key = (kind, cycle.creation_time, cycle.lead_hours)
-        task = _choropleth_tasks.get(key)
-        if task is None or (task.done() and task.exception() is not None):
-            task = _choropleth_tasks[key] = asyncio.create_task(_run_choropleth(kind, cycle))
         try:
+            if await repositories.cached_choropleth(kind, creation_time, lead):
+                continue
+            cycle, _model = await _resolve(lead)
+            key = (kind, cycle.creation_time, cycle.lead_hours)
+            task = _choropleth_tasks.get(key)
+            if task is None or (task.done() and task.exception() is not None):
+                task = _choropleth_tasks[key] = asyncio.create_task(_run_choropleth(kind, cycle))
             await task
         except Exception as exc:  # noqa: BLE001 - one lead failing must not stop the rest
-            logger.warning("warm_lead_failed", kind=kind, lead=cycle.lead_hours, error=str(exc))
+            logger.warning("warm_lead_failed", kind=kind, lead=lead, error=str(exc))
 
 
 async def warm_status(kind: str) -> dict[str, Any]:

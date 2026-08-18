@@ -58,6 +58,11 @@ const CARI_LAYER_CONFIG = [
 // districts by district_code (the name is not unique across the Line of Control).
 const REGION_KIND = { pak_districts: 'district', pak_tehsils: 'tehsil', iiojk_districts: 'iiojk' }
 
+// Boundary layers to leave out of the layers panel. The IIOJK districts are
+// already carried by the ordinary districts layer, so a separate toggle only
+// duplicates them.
+const HIDDEN_LAYERS = new Set(['iiojk_districts'])
+
 function Splash ({ children }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 bg-bg p-8">
@@ -103,7 +108,7 @@ export default function App () {
   const layersHydratedRef = useRef(false)
 
   const ready = contractState.status === 'ready'
-  const layers = useMemo(() => (ready ? contracts().layers : []), [ready])
+  const layers = useMemo(() => (ready ? contracts().layers.filter((l) => !HIDDEN_LAYERS.has(l.id)) : []), [ready])
   const rasterLayers = useMemo(() => (ready ? contracts().rasterLayers : []), [ready])
 
   // Which raster layers can actually serve a tile today. Declared in the

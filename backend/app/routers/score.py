@@ -85,6 +85,21 @@ async def cari_choropleth(
     return await score_service.cari_choropleth(kind, forecast_hours, matrix)
 
 
+@router.get("/cari/warm")
+async def cari_warm(
+    kind: Literal["district", "tehsil"] = Query(
+        "district", description="Which layer's timeline to warm"
+    ),
+) -> dict:
+    """Warm the whole timeline for a layer, so every slider position is instant.
+
+    Idempotent progress endpoint: it reports how many published leads are already
+    cached and, while any remain, ensures a background pass is filling the rest
+    one lead at a time. The frontend calls it on entering Analysis and polls it.
+    """
+    return await score_service.warm_timeline(kind)
+
+
 @router.get("/susceptibility")
 async def susceptibility(forecast_hours: int = Query(0, ge=-168, le=360)) -> dict:
     """Susceptibility score per district, 0 to 13.

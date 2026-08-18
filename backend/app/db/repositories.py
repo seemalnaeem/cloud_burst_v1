@@ -92,6 +92,66 @@ async def district_geometry(name: str, tolerance_deg: float | None = None) -> di
     }
 
 
+async def list_district_geometries(tolerance_deg: float) -> list[dict[str, Any]]:
+    """Every district with simplified geometry, in one query.
+
+    The whole-layer scorer needs all boundaries at once; fetching them per
+    feature is 188 round trips. This returns them together, simplified to the
+    same tolerance the choropleth uses, geometry already parsed to a dict.
+    """
+    rows = await pool.fetch(
+        f"""
+        SELECT district_name, province,
+               ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom, {float(tolerance_deg)}))::text AS geometry
+        FROM geo.districts
+        ORDER BY district_name
+        """
+    )
+    return [
+        {"district_name": r["district_name"], "province": r["province"],
+         "geometry": json.loads(r["geometry"])}
+        for r in rows
+    ]
+
+
+async def list_tehsil_geometries(tolerance_deg: float) -> list[dict[str, Any]]:
+    """Every tehsil with simplified geometry, in one query.
+
+    The tehsil analog of list_district_geometries, keyed on tehsil_code with the
+    parent district as district_src so the scorer can pick the terrain matrix.
+    """
+    rows = await pool.fetch(
+        f"""
+        SELECT tehsil_code, tehsil, province, district_src,
+               ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom, {float(tolerance_deg)}))::text AS geometry
+        FROM geo.tehsils
+        ORDER BY tehsil_code
+        """
+    )
+    return [
+        {"tehsil_code": r["tehsil_code"], "tehsil": r["tehsil"], "province": r["province"],
+         "district_src": r["district_src"], "geometry": json.loads(r["geometry"])}
+        for r in rows
+    ]
+
+
+async def cached_choropleth_leads(feature_kind: str, creation_time) -> set[int]:
+    """Which leads already have a cached choropleth for this kind and cycle.
+
+    One query behind the timeline warm-up progress, so a poll reports how much of
+    the slider is ready without probing each lead separately.
+    """
+    rows = await pool.fetch(
+        """
+        SELECT lead_hours FROM score.cari_choropleth
+        WHERE feature_kind = $1 AND creation_time = $2
+        """,
+        feature_kind,
+        creation_time,
+    )
+    return {r["lead_hours"] for r in rows}
+
+
 async def district_extent(name: str) -> dict[str, float] | None:
     row = await pool.fetchrow("SELECT * FROM geo.district_extent($1)", name)
     return dict(row) if row else None
@@ -433,6 +493,78 @@ async def store_cari(creation_time, lead_hours: int, district: str, result) -> N
         result.cari,
         result.class_idx,
         result.override_applied,
+    )
+
+
+async def cached_cari_tehsil(creation_time, lead_hours: int, tehsil_code: str):
+    """The cached full CARI for one tehsil, or None.
+
+    The tehsil cache is written only by the whole-layer choropleth pass, which
+    always scores under the automatic terrain matrix, so at most one row exists
+    per cycle and lead and a lookup by code alone is unambiguous.
+    """
+    row = await pool.fetchrow(
+        """
+        SELECT scores, cas, cari, class_idx, override_applied, matrix
+        FROM score.cari_tehsil
+        WHERE creation_time = $1 AND lead_hours = $2 AND tehsil_code = $3
+        """,
+        creation_time,
+        lead_hours,
+        tehsil_code,
+    )
+    return dict(row) if row else None
+
+
+async def store_cari_batch(creation_time, lead_hours: int, rows: list[tuple]) -> None:
+    """Pre-warm the district detail-card cache for a whole layer at once.
+
+    rows is a list of (district_name, result). Called at the end of the district
+    choropleth pass so a click on any coloured district reads score.cari instead
+    of rescoring 13 rasters. The upsert matches store_cari exactly.
+    """
+    await pool.executemany(
+        """
+        INSERT INTO score.cari (creation_time, lead_hours, district_name, matrix,
+                                scores, cas, cari, class_idx, override_applied)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
+        ON CONFLICT (creation_time, lead_hours, district_name, matrix)
+        DO UPDATE SET scores = EXCLUDED.scores, cas = EXCLUDED.cas,
+                      cari = EXCLUDED.cari, class_idx = EXCLUDED.class_idx,
+                      override_applied = EXCLUDED.override_applied,
+                      computed_at = now()
+        """,
+        [
+            (creation_time, lead_hours, name, r.matrix, json.dumps(r.scores),
+             r.cas, r.cari, r.class_idx, r.override_applied)
+            for name, r in rows
+        ],
+    )
+
+
+async def store_cari_tehsil_batch(creation_time, lead_hours: int, rows: list[tuple]) -> None:
+    """Pre-warm the tehsil detail-card cache for a whole layer at once.
+
+    rows is a list of (tehsil_code, result). Mirrors store_cari_batch for the
+    tehsil layer, populating score.cari_tehsil from the choropleth pass so a
+    tehsil click is one indexed read.
+    """
+    await pool.executemany(
+        """
+        INSERT INTO score.cari_tehsil (creation_time, lead_hours, tehsil_code, matrix,
+                                       scores, cas, cari, class_idx, override_applied)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
+        ON CONFLICT (creation_time, lead_hours, tehsil_code, matrix)
+        DO UPDATE SET scores = EXCLUDED.scores, cas = EXCLUDED.cas,
+                      cari = EXCLUDED.cari, class_idx = EXCLUDED.class_idx,
+                      override_applied = EXCLUDED.override_applied,
+                      computed_at = now()
+        """,
+        [
+            (creation_time, lead_hours, code, r.matrix, json.dumps(r.scores),
+             r.cas, r.cari, r.class_idx, r.override_applied)
+            for code, r in rows
+        ],
     )
 
 

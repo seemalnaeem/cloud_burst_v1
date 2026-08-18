@@ -62,6 +62,18 @@ async def execute(query: str, *args: Any) -> str:
         return await conn.execute(query, *args)
 
 
+async def executemany(query: str, args: list[tuple]) -> None:
+    """Run one statement against many argument tuples on a single connection.
+
+    Used to pre-warm the per feature score caches at the end of a choropleth
+    pass, so hundreds of upserts share one connection rather than one each.
+    """
+    if not args:
+        return
+    async with get_pool().acquire() as conn:
+        await conn.executemany(query, args)
+
+
 async def healthy() -> bool:
     try:
         return await fetchval("SELECT 1") == 1

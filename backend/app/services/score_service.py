@@ -348,16 +348,32 @@ async def cari_for_tehsil(
     """CARI for one tehsil.
 
     A tehsil is scored the same way a district is, over its own geometry, and
-    picks its threshold matrix from its parent district. It is computed fresh
-    each time rather than cached: a single tehsil is fast, and the whole-layer
-    pass that would benefit from a cache has its own in cari_choropleth.
+    picks its threshold matrix from its parent district.
+
+    On the automatic path it reads score.cari_tehsil first: the whole-layer
+    choropleth pass pre-warms that cache with every tehsil's full result, so a
+    click on a coloured tehsil is one indexed read rather than a fresh rescore.
+    An explicit matrix override is the admin path and always scores fresh.
     """
     cycle, _model = await _resolve(forecast_hours)
+
+    if matrix is None:
+        cached = await repositories.cached_cari_tehsil(
+            cycle.creation_time, cycle.lead_hours, tehsil_code
+        )
+        if cached:
+            logger.debug("cari_tehsil_cache_hit", tehsil=tehsil_code)
+            return _tehsil_envelope(cycle, tehsil_code, cached)
+
     info = await repositories.tehsil_geometry(tehsil_code)
     chosen = matrix or cari_model.terrain_class(info["province"], info["district_src"])
 
     inputs = await _resolve_inputs(cycle)
     result, fallback = await _score_geometry(cycle, inputs, info["geometry"], chosen)
+    if matrix is None:
+        await repositories.store_cari_tehsil_batch(
+            cycle.creation_time, cycle.lead_hours, [(tehsil_code, result)]
+        )
 
     return _card(
         cycle,
@@ -381,52 +397,147 @@ async def cari_for_tehsil(
 _choropleth_tasks: dict[tuple, asyncio.Task] = {}
 
 
+# Static terrain reduced per feature, cached for the life of the process. A
+# district's max elevation and slope come from the native DEM, which is billions
+# of pixels and by far the most expensive input, and they do not change with lead
+# or cycle, so scoring them once per kind and reusing keeps them out of every
+# subsequent pass. Keyed by (kind, path) so a re-ingested terrain file misses.
+_static_terrain: dict[tuple, dict[Any, float | None]] = {}
+
+
+async def _reduce_static(
+    kind: str,
+    feats: list[tuple[Any, dict]],
+    static_paths: dict[str, str],
+    reducers: dict[str, str],
+    clamps: dict,
+) -> dict[Any, dict[str, float | None]]:
+    """Reduce the static terrain variables, from cache where possible.
+
+    Windowed reads, because the DEM is far too large to hold in RAM, and memoised
+    across leads and cycles because terrain does not move. The first pass that
+    needs it pays the cost once; every lead after reads it straight from memory.
+    """
+    out: dict[Any, dict[str, float | None]] = {fid: {} for fid, _ in feats}
+    for key, path in static_paths.items():
+        cache_key = (kind, path)
+        cached = _static_terrain.get(cache_key)
+        if cached is None:
+            cached = await run_in_threadpool(
+                zonal.zonal_reduce_windowed, path, feats, reducers[key], clamps.get(key)
+            )
+            _static_terrain[cache_key] = cached
+        for fid, _ in feats:
+            out[fid][key] = cached.get(fid)
+    return out
+
+
+async def _reduce_layer(
+    paths: dict[str, str],
+    feats: list[tuple[Any, dict]],
+    reducers: dict[str, str],
+    clamps: dict,
+    models: dict[str, tuple[str | None, str]],
+    kind: str,
+) -> dict[Any, dict[str, float | None]]:
+    """Reduce every raster over every feature for a whole layer.
+
+    Split by cost. The static terrain (elevation, slope) is a billion-pixel DEM
+    that never changes, so it is reduced windowed and cached once in
+    _reduce_static. The forecast inputs are small grids that change every lead, so
+    they go through zonal_layer, which opens each once, reads it into RAM and
+    rasterizes each polygon mask once per grid, all in a worker thread because the
+    masking holds the GIL. Merged per feature; identical numbers to a per feature
+    pass.
+    """
+    static_paths = {k: paths[k] for k in paths if models[k][0] is None}
+    forecast_paths = {k: paths[k] for k in paths if models[k][0] is not None}
+
+    static_vals = await _reduce_static(kind, feats, static_paths, reducers, clamps)
+    forecast_vals = (
+        await run_in_threadpool(zonal.zonal_layer, forecast_paths, feats, reducers, clamps)
+        if forecast_paths
+        else {fid: {} for fid, _ in feats}
+    )
+
+    out: dict[Any, dict[str, float | None]] = {}
+    for fid, _ in feats:
+        merged = dict(forecast_vals.get(fid, {}))
+        merged.update(static_vals.get(fid, {}))
+        out[fid] = merged
+    return out
+
+
 async def _compute_choropleth(kind: str, cycle, matrix: str | None) -> list[dict[str, Any]]:
-    """Score every feature of a layer. The slow pass behind the cache."""
-    inputs = await _resolve_inputs(cycle)
+    """Score every feature of a layer. The slow pass behind the cache.
+
+    Two things make this fast enough to warm a whole timeline: the boundaries
+    come back in one query, and the rasters are read open-once and concurrently
+    in _reduce_layer instead of reopened per feature. The lead fallback stays per
+    feature, bounded by the batch gate, because it is rare and its per feature
+    memo semantics must match the single-feature card exactly.
+    """
+    specs, paths, reducers, clamps, models = await _resolve_inputs(cycle)
 
     if kind == "district":
-        rows = await repositories.list_districts()
+        rows = await repositories.list_district_geometries(_CHOROPLETH_TOLERANCE)
+        feats = [(r["district_name"], r["geometry"]) for r in rows]
+        # (label, province, terrain district) per key; a district is its own terrain parent.
+        meta = {r["district_name"]: (r["district_name"], r["province"], r["district_name"]) for r in rows}
     elif kind == "tehsil":
-        rows = await repositories.list_tehsils()
+        rows = await repositories.list_tehsil_geometries(_CHOROPLETH_TOLERANCE)
+        feats = [(r["tehsil_code"], r["geometry"]) for r in rows]
+        meta = {r["tehsil_code"]: (r["tehsil"], r["province"], r["district_src"]) for r in rows}
     else:
         raise NotConfigured("score.cari_choropleth", f"unknown choropleth kind {kind!r}")
+
+    values_by_feat = await _reduce_layer(paths, feats, reducers, clamps, models, kind)
 
     # One fallback-lead memo shared by every feature in the pass. Which lead a band
     # falls back to is domain-wide, so this turns 553 per-feature probes into one.
     fallback_cache: dict = {}
 
-    async def score_row(row: dict) -> dict[str, Any]:
+    async def finish(key: Any, geom: dict) -> dict[str, Any]:
         async with _batch:
-            if kind == "district":
-                key = label = row["district_name"]
-                terrain_district = key
-                geom = (
-                    await repositories.district_geometry(key, tolerance_deg=_CHOROPLETH_TOLERANCE)
-                )["geometry"]
-            else:
-                key = row["tehsil_code"]
-                label = row["tehsil"]
-                terrain_district = row["district_src"]
-                geom = (
-                    await repositories.tehsil_geometry(key, tolerance_deg=_CHOROPLETH_TOLERANCE)
-                )["geometry"]
-
-            chosen = matrix or cari_model.terrain_class(row["province"], terrain_district)
-            specs, paths, reducers, clamps, models = inputs
-            values = await run_in_threadpool(zonal.zonal_many, paths, geom, reducers, clamps)
-            await _apply_lead_fallback(specs, values, cycle.lead_hours, geom, reducers, clamps, models, fallback_cache)
+            values = values_by_feat[key]
+            await _apply_lead_fallback(
+                specs, values, cycle.lead_hours, geom, reducers, clamps, models, fallback_cache
+            )
+            name, province, terrain_district = meta[key]
+            chosen = matrix or cari_model.terrain_class(province, terrain_district)
             result = cari_model.score(values, chosen)
 
-        return {"key": key, "name": label, "cari": result.cari, "classIdx": result.class_idx}
+        # result is kept alongside the compact class entry so the caller can
+        # pre-warm the per feature detail-card cache from the same pass.
+        return {"key": key, "name": name, "cari": result.cari,
+                "classIdx": result.class_idx, "result": result}
 
-    return list(await asyncio.gather(*(score_row(row) for row in rows)))
+    return list(await asyncio.gather(*(finish(k, g) for k, g in feats)))
+
+
+def _compact(features: list[dict]) -> list[dict[str, Any]]:
+    """The choropleth payload: class and percentage per feature, no full result."""
+    return [
+        {"key": f["key"], "name": f["name"], "cari": f["cari"], "classIdx": f["classIdx"]}
+        for f in features
+    ]
 
 
 async def _run_choropleth(kind: str, cycle) -> None:
-    """Background body: compute the layer and cache it under the auto matrix."""
+    """Background body: compute the layer, cache the class array, and pre-warm
+    the per feature detail-card cache so a click on any feature is an indexed
+    read rather than a fresh rescore.
+    """
     features = await _compute_choropleth(kind, cycle, None)
-    await repositories.store_choropleth(kind, cycle.creation_time, cycle.lead_hours, features)
+    await repositories.store_choropleth(
+        kind, cycle.creation_time, cycle.lead_hours, _compact(features)
+    )
+
+    per_feature = [(f["key"], f["result"]) for f in features]
+    if kind == "district":
+        await repositories.store_cari_batch(cycle.creation_time, cycle.lead_hours, per_feature)
+    else:
+        await repositories.store_cari_tehsil_batch(cycle.creation_time, cycle.lead_hours, per_feature)
 
 
 def _choropleth_ready(kind: str, cycle, features: list[dict]) -> dict[str, Any]:
@@ -460,7 +571,7 @@ async def cari_choropleth(
     cycle, _model = await _resolve(forecast_hours)
 
     if matrix is not None:
-        features = await _compute_choropleth(kind, cycle, matrix)
+        features = _compact(await _compute_choropleth(kind, cycle, matrix))
         return _choropleth_ready(kind, cycle, features)
 
     key = (kind, cycle.creation_time, cycle.lead_hours)
@@ -491,6 +602,82 @@ async def cari_choropleth(
     }
 
 
+# Background timeline warm-ups, one task per kind. Where cari_choropleth computes
+# the lead the user is looking at, this walks every published lead so the whole
+# slider becomes a cache hit without the user stepping through it. It runs the
+# leads sequentially and reuses _choropleth_tasks per lead, so it never competes
+# with an on-demand compute for the same lead, only fills the ones nobody asked
+# for yet.
+_warm_tasks: dict[str, asyncio.Task] = {}
+
+
+async def _warm_targets() -> tuple[Any, list[int]]:
+    """The headline cycle and its published leads, the set a warm-up covers.
+
+    The choropleth snaps any requested hour to one of these leads and caches
+    under it, so warming every published lead makes every slider position a hit.
+    """
+    model = await _headline_model()
+    cyc = await repositories.latest_cycle(model)
+    if cyc is None:
+        return None, []
+    leads = sorted({int(lead) for lead in (cyc["published_leads"] or [])})
+    return cyc["creation_time"], leads
+
+
+async def _warm_body(kind: str) -> None:
+    """Compute every uncached lead for a kind, one at a time.
+
+    Sequential on purpose: each lead already fans thirteen rasters out
+    concurrently, so running leads in parallel would only thrash the same disk.
+    A lead already being computed on demand is awaited through the shared task
+    rather than recomputed, and a lead that fails is logged and skipped so one
+    bad step does not stall the rest of the timeline.
+    """
+    creation_time, leads = await _warm_targets()
+    if not creation_time:
+        return
+
+    for lead in leads:
+        if await repositories.cached_choropleth(kind, creation_time, lead):
+            continue
+        cycle, _model = await _resolve(lead)
+        key = (kind, cycle.creation_time, cycle.lead_hours)
+        task = _choropleth_tasks.get(key)
+        if task is None or (task.done() and task.exception() is not None):
+            task = _choropleth_tasks[key] = asyncio.create_task(_run_choropleth(kind, cycle))
+        try:
+            await task
+        except Exception as exc:  # noqa: BLE001 - one lead failing must not stop the rest
+            logger.warning("warm_lead_failed", kind=kind, lead=cycle.lead_hours, error=str(exc))
+
+
+async def warm_status(kind: str) -> dict[str, Any]:
+    """How much of the timeline is cached for a kind, for the progress readout."""
+    creation_time, leads = await _warm_targets()
+    if not creation_time:
+        return {"kind": kind, "total": 0, "ready": 0, "leads": []}
+
+    done = await repositories.cached_choropleth_leads(kind, creation_time)
+    per = [{"leadHours": lead, "status": "ready" if lead in done else "pending"} for lead in leads]
+    return {"kind": kind, "total": len(leads), "ready": len(done & set(leads)), "leads": per}
+
+
+async def warm_timeline(kind: str) -> dict[str, Any]:
+    """Report timeline progress and ensure the background warm-up is running.
+
+    Idempotent: the frontend calls this on entering Analysis and then polls it.
+    It starts the warm task only while leads remain, so once the whole slider is
+    cached the poll settles to a plain status read.
+    """
+    status = await warm_status(kind)
+    if status["ready"] < status["total"]:
+        task = _warm_tasks.get(kind)
+        if task is None or task.done():
+            _warm_tasks[kind] = asyncio.create_task(_warm_body(kind))
+    return status
+
+
 def _envelope(cycle, district, matrix, cached, from_cache=False) -> dict[str, Any]:
     classes = contracts.cari()["classes"]
     cls = classes[cached["class_idx"]]
@@ -510,6 +697,34 @@ def _envelope(cycle, district, matrix, cached, from_cache=False) -> dict[str, An
         "overrideApplied": cached["override_applied"],
         "classes": classes,
         "fromCache": from_cache,
+    }
+
+
+def _tehsil_envelope(cycle, tehsil_code, cached) -> dict[str, Any]:
+    """The cached tehsil card, the tehsil analog of _envelope.
+
+    The Analysis card reads tehsil and district labels from the clicked vector
+    feature, not from this response, so the cached envelope carries the score and
+    class rather than re-fetching identity, which keeps the hit a single read.
+    """
+    classes = contracts.cari()["classes"]
+    cls = classes[cached["class_idx"]]
+    return {
+        "tehsilCode": tehsil_code,
+        "creationTime": cycle.creation_time,
+        "leadHours": cycle.lead_hours,
+        "isHistorical": cycle.is_historical,
+        "matrix": cached["matrix"],
+        "scores": cached["scores"],
+        "cas": cached["cas"],
+        "casMax": contracts.cari()["casMax"],
+        "cari": cached["cari"],
+        "classIdx": cached["class_idx"],
+        "riskLevel": cls["name"],
+        "riskColor": cls["color"],
+        "overrideApplied": cached["override_applied"],
+        "classes": classes,
+        "fromCache": True,
     }
 
 

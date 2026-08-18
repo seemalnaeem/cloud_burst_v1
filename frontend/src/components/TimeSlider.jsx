@@ -43,14 +43,18 @@ function leadText (h) {
   return r ? `+${d}d ${String(r).padStart(2, '0')}h` : `+${d}d`
 }
 
-/** One cell of the readout group. Lead is emphasised, it is what changes most. */
-function Readout ({ label, value, emphasis = false }) {
+/** One cell of the readout group. Lead is emphasised, it is what changes most.
+ *
+ * minW reserves a fixed width so a value that grows ("+6h" to "+15d 21h") does
+ * not widen the group and squeeze the scrubber; the value is right aligned into
+ * the reserved space, so the track keeps a constant width as the slider moves. */
+function Readout ({ label, value, emphasis = false, minW = '' }) {
   return (
-    <div className={`flex flex-col items-end px-2.5 py-1 ${emphasis ? 'bg-primary-soft' : ''}`}>
+    <div className={`flex flex-col items-end px-2.5 py-1 ${minW} ${emphasis ? 'bg-primary-soft' : ''}`}>
       <span className={`text-[9px] uppercase tracking-[0.07em] ${emphasis ? 'text-primary' : 'text-muted'}`}>
         {label}
       </span>
-      <span className={`font-mono text-[12px] tabular-nums ${emphasis ? 'font-semibold text-primary' : 'text-text'}`}>
+      <span className={`whitespace-nowrap font-mono text-[12px] tabular-nums ${emphasis ? 'font-semibold text-primary' : 'text-text'}`}>
         {value}
       </span>
     </div>
@@ -211,7 +215,7 @@ export default function TimeSlider ({
         <div className="flex shrink-0 items-stretch divide-x divide-border overflow-hidden rounded-cb-sm border border-border">
           <Readout label="Valid PKT" value={fmt(validDate, PKT)} />
           <Readout label="UTC" value={fmt(validDate, 'UTC')} />
-          <Readout label="Lead" value={leadText(lead)} emphasis />
+          <Readout label="Lead" value={leadText(lead)} emphasis minW="min-w-[5rem]" />
         </div>
       </div>
 

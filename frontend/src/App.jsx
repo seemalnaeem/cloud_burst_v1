@@ -27,6 +27,7 @@ import { useContracts } from '@/hooks/useContracts'
 import { useComputedRasters } from '@/hooks/useComputedRasters'
 import { useForecast } from '@/hooks/useForecast'
 import { useRasterAvailability } from '@/hooks/useRasterAvailability'
+import { useRasterPrefetch } from '@/hooks/useRasterPrefetch'
 import { useTheme } from '@/hooks/useTheme'
 import { getLayerExtent, getRasterPoint } from '@/lib/api'
 import { availableBasemaps, defaultBasemapId, findBasemap, hasMapboxToken } from '@/lib/basemaps'
@@ -307,6 +308,17 @@ export default function App () {
     [rasterLayers, effectiveVisible]
   )
   const computedTimes = useComputedRasters(visibleComputedIds, activeLead)
+  // Warm the tiles for the leads the slider is about to reach, so scrubbing and
+  // playing a forecast layer render from cache instead of a fresh render pass.
+  useRasterPrefetch({
+    map,
+    rasterLayers,
+    visibleLayers: effectiveVisible,
+    leads,
+    leadIndex,
+    playing,
+    creationTime: forecast.creationTime
+  })
   const computingLabels = useMemo(
     () => rasterLayers
       .filter((l) => l.source === 'computed' && effectiveVisible.has(l.id) && computedTimes[l.id]?.status === 'computing')

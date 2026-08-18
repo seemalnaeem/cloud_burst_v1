@@ -7,6 +7,7 @@
 
 import { Router } from 'express'
 
+import { cache } from '../lib/cache.js'
 import { config } from '../config.js'
 import { layers, bands, palettes } from '../lib/contracts.js'
 import { EMPTY_TILE } from '../lib/emptyTile.js'
@@ -95,11 +96,22 @@ tilesRouter.get('/raster/:layer/:z/:x/:y.png', async (req, res, next) => {
     if (req.query.creation_time) resolveUrl.searchParams.set('creation_time', String(req.query.creation_time))
     if (req.query.lead) resolveUrl.searchParams.set('lead', String(req.query.lead))
 
+    // The resolve answer (COG path, palette, rescale) is identical for every
+    // x/y/z of a given layer/model/cycle/lead and immutable once that step is
+    // catalogued, so memoize it: without this every tile of a lead repeats the
+    // same API + DB lookup, which is the cost the client prefetch has to hide.
+    //
     // 501 (NOT_CONFIGURED) is allowed through: a temporal layer legitimately has
     // no tile at some cycles and leads (a field can be initialised on a different
     // run than the model's main cycle, so it does not cover every step). That is
     // an empty tile, exactly like a 404 from the tiler, not a 502 error banner.
-    const resolved = await http.getJson(resolveUrl.toString(), { timeoutMs: 15000, allowStatus: [501] })
+    const resolved = await cache.wrap(
+      'resolve',
+      { layer: id, band: bandKey, model: req.query.model, creation_time: req.query.creation_time, lead: req.query.lead },
+      () => http.getJson(resolveUrl.toString(), { timeoutMs: 15000, allowStatus: [501] }),
+      // Same 6 h horizon the rendered tiles are cached for at the browser.
+      { ttlSeconds: 21600 }
+    )
 
     if (!resolved?.path) {
       res.setHeader('Content-Type', 'image/png')

@@ -358,6 +358,57 @@ export function setRasterTime (map, def, { creationTime, leadHours } = {}) {
   if (src?.setTiles) src.setTiles([rasterTemplate(def, { creationTime, leadHours })])
 }
 
+// The raster sources use 256 px tiles (addRasterLayer), so Mapbox requests them
+// one zoom deeper than the map's own zoom. Match that here so the URLs we warm
+// are the exact ones the source will later ask for.
+const RASTER_TILE_SIZE = 256
+
+function lngToTileX (lng, z) {
+  return Math.floor(((lng + 180) / 360) * 2 ** z)
+}
+
+function latToTileY (lat, z) {
+  const r = (lat * Math.PI) / 180
+  return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * 2 ** z)
+}
+
+/**
+ * The raster tile URLs a layer would request for the map's current viewport at a
+ * given cycle and lead, byte-identical to what the live source will fetch.
+ *
+ * Used to warm the browser cache for leads the slider is about to reach, so
+ * setRasterTime's refetch is served from cache and the swap looks instant. The
+ * tile zoom follows Mapbox's own rule for a 256 px source (one level deeper than
+ * the map zoom); a slightly-off edge tile just means one wasted or missed warm,
+ * never a wrong picture. Capped so a zoomed-out viewport cannot fan out into a
+ * flood of prefetches.
+ */
+export function tileUrlsForViewport (map, def, { creationTime, leadHours, maxTiles = 48 } = {}) {
+  if (!map || !def) return []
+  const bounds = map.getBounds()
+  if (!bounds) return []
+
+  const z = Math.max(0, Math.round(map.getZoom() + Math.log2(512 / RASTER_TILE_SIZE)))
+  const span = 2 ** z
+  const clamp = (v) => Math.min(span - 1, Math.max(0, v))
+
+  const xMin = clamp(lngToTileX(bounds.getWest(), z))
+  const xMax = clamp(lngToTileX(bounds.getEast(), z))
+  const yMin = clamp(latToTileY(bounds.getNorth(), z))
+  const yMax = clamp(latToTileY(bounds.getSouth(), z))
+
+  if ((xMax - xMin + 1) * (yMax - yMin + 1) > maxTiles) return []
+
+  const template = rasterTemplate(def, { creationTime, leadHours })
+  const urls = []
+  for (let x = xMin; x <= xMax; x++) {
+    for (let y = yMin; y <= yMax; y++) {
+      urls.push(template.replace('{z}', z).replace('{x}', x).replace('{y}', y))
+    }
+  }
+  return urls
+}
+
 // ------------------------------------------------------------------- radar
 //
 // Radar frames are single georeferenced PNGs, not tiles, so they ride on an

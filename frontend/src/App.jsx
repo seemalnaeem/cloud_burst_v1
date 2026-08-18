@@ -30,8 +30,7 @@ import { useRasterAvailability } from '@/hooks/useRasterAvailability'
 import { useTheme } from '@/hooks/useTheme'
 import { getLayerExtent, getRasterPoint } from '@/lib/api'
 import { availableBasemaps, defaultBasemapId, findBasemap, hasMapboxToken } from '@/lib/basemaps'
-import { cariClasses, contracts, radarBounds, radarLayers, radarRing, radarScale, rasterScale } from '@/lib/contracts'
-import { matchRadarBand, radarBandRange, sampleRadarPixel } from '@/lib/radarSample'
+import { cariClasses, contracts, radarBounds, radarLayers, radarRing, rasterScale } from '@/lib/contracts'
 import { DEFAULT_BOUNDS, fitToBounds, fitToExtent } from '@/lib/map'
 import { getStored, setStored } from '@/lib/storage'
 
@@ -554,37 +553,6 @@ export default function App () {
   // from the map's draw order; everything else, the model, cycle and lead, is
   // what the map is currently showing, so the number matches the pixel.
   const onIdentify = useCallback(async ({ layerId, lng, lat }) => {
-    // Radar takes the click when a visible frame covers the point: the pixel is
-    // read on the client and reported as its band range. Topmost (last drawn)
-    // first, so an overlapping site wins the way it does on the map.
-    for (let k = radarOverlays.length - 1; k >= 0; k--) {
-      const o = radarOverlays[k]
-      const c = o.coordinates
-      const within = lng >= c[0][0] && lng <= c[1][0] && lat <= c[0][1] && lat >= c[2][1]
-      if (!within) continue
-
-      const layerDef = radarLayerDefs.find((l) => l.id === o.id)
-      const scale = radarScale(layerDef)
-      const label = `${layerDef.siteLabel} · ${layerDef.label}`
-      setRasterSelection({ def: { label, color: '#38bdf8' }, lng, lat, status: 'loading' })
-      try {
-        const pixel = await sampleRadarPixel(o.imageUrl, c, lng, lat)
-        const idx = matchRadarBand(pixel, scale.classes)
-        if (idx == null) {
-          setRasterSelection({ def: { label, color: '#94a3b8' }, lng, lat, status: 'ok', valueText: 'No echo' })
-        } else {
-          setRasterSelection({
-            def: { label, color: scale.classes[idx].color },
-            lng, lat, status: 'ok',
-            valueText: radarBandRange(scale.classes, idx), unit: scale.unit, legendTitle: scale.title
-          })
-        }
-      } catch {
-        setRasterSelection({ def: { label, color: '#94a3b8' }, lng, lat, status: 'error' })
-      }
-      return
-    }
-
     const def = rasterLayers.find((l) => l.id === layerId)
     if (!def) {
       setRasterSelection(null)
@@ -625,7 +593,7 @@ export default function App () {
       if (identifyReqRef.current !== reqId) return
       setRasterSelection({ def, lng, lat, status: 'error' })
     }
-  }, [radarOverlays, radarLayerDefs, rasterLayers, forecast.creationTime, activeLead, computedTimes, cariClassList])
+  }, [rasterLayers, forecast.creationTime, activeLead, computedTimes, cariClassList])
 
   if (contractState.status === 'loading') {
     return (

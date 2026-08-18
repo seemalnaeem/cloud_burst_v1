@@ -9,6 +9,8 @@
 
 import { TbCurrentLocation, TbInfoCircle, TbX } from 'react-icons/tb'
 
+import { fmtUnit } from '@/lib/format'
+
 import { Panel, IconButton, Chip } from './ui/Panel'
 
 function formatValue (value, unit) {
@@ -16,7 +18,7 @@ function formatValue (value, unit) {
   const abs = Math.abs(value)
   const decimals = abs >= 100 ? 0 : abs >= 1 ? 1 : 2
   const num = value.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
-  return unit ? `${num} ${unit}` : num
+  return unit ? `${num} ${fmtUnit(unit)}` : num
 }
 
 function Row ({ label, children }) {

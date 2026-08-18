@@ -430,11 +430,17 @@ export default function App () {
     return ids.map((id) => byId.get(id)).filter(Boolean)
   }, [layerOrder, layers])
 
-  // The active model's temporal layers, for the forecast chart's variable picker,
-  // defaulting to whichever is currently shown on the map.
+  // Every model's temporal layers, so the forecast chart can pick a model and
+  // then that model's variables, independent of the map's active model.
+  const chartTemporalLayers = useMemo(
+    () => rasterLayers.filter((l) => l.temporal),
+    [rasterLayers]
+  )
+  // The active model's temporal layers, used only to seed the chart's opening
+  // variable from whatever is currently shown on the map.
   const chartLayers = useMemo(
-    () => rasterLayers.filter((l) => l.modelId === activeModelId && l.temporal),
-    [rasterLayers, activeModelId]
+    () => chartTemporalLayers.filter((l) => l.modelId === activeModelId),
+    [chartTemporalLayers, activeModelId]
   )
   const chartInitialLayerId = useMemo(() => {
     const shown = chartLayers.find((l) => visibleLayers.has(l.id))
@@ -707,13 +713,16 @@ export default function App () {
         {/* Forecast trend chart for a selected boundary, floated over the lower
             map above the timeline. Map view only, and only once a model has
             temporal layers to chart. */}
-        {!analysis && !radar && chartRegion && chartLayers.length > 0 && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-24 z-30 flex justify-center px-3">
+        {!analysis && !radar && chartRegion && chartTemporalLayers.length > 0 && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-28 z-30 flex justify-center px-3">
             <ForecastChartPanel
               region={chartRegion}
-              layers={chartLayers}
+              layers={chartTemporalLayers}
+              models={forecastModels}
+              availability={availability}
+              initialModelId={activeModelId}
               initialLayerId={chartInitialLayerId}
-              creationTime={forecast.creationTime}
+              isDark={isDark}
               onClose={() => setChartRegion(null)}
             />
           </div>

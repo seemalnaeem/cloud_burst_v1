@@ -1,5 +1,5 @@
 import { legendTicks, paletteColors } from '@/lib/color'
-import { fmtNumber } from '@/lib/format'
+import { fmtNumber, fmtUnit } from '@/lib/format'
 
 /**
  * Legend rendered from a contract palette.
@@ -48,7 +48,7 @@ export default function Legend ({ title, paletteName, kind, classes, min, max, u
               </span>
             ))}
           </div>
-          {unit && <p className="mt-1 text-center text-[10px] text-muted">{unit}</p>}
+          {unit && <p className="mt-1 text-center text-[10px] text-muted">{fmtUnit(unit)}</p>}
         </>
       )}
     </div>

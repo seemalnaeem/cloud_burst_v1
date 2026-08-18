@@ -9,6 +9,20 @@ const PLACEHOLDER = '–' // en dash, used only as a visual placeholder
 export const isMissing = (value) =>
   value === null || value === undefined || (typeof value === 'number' && Number.isNaN(value))
 
+const SUPERSCRIPT = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' }
+
+/**
+ * A unit string with its exponents raised.
+ *
+ * Digits in a unit are always powers here (kg/m2, m/s2), so "kg/m2" should read
+ * "kg/m²" not "kg/m2". Every place that prints a unit runs it through this so the
+ * chart, the legends and the identify card all agree.
+ */
+export function fmtUnit (unit) {
+  if (!unit) return ''
+  return String(unit).replace(/\d/g, (d) => SUPERSCRIPT[d])
+}
+
 export function fmtNumber (value, decimals = 1) {
   if (isMissing(value)) return PLACEHOLDER
   return Number(value).toLocaleString(undefined, {
@@ -19,7 +33,7 @@ export function fmtNumber (value, decimals = 1) {
 
 export function fmtValue (value, unit, decimals = 1) {
   if (isMissing(value)) return PLACEHOLDER
-  return `${fmtNumber(value, decimals)}${unit ? ` ${unit}` : ''}`
+  return `${fmtNumber(value, decimals)}${unit ? ` ${fmtUnit(unit)}` : ''}`
 }
 
 export function fmtPercent (value, decimals = 1) {

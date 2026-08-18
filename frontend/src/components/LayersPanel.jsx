@@ -24,6 +24,7 @@ import {
 } from 'react-icons/tb'
 
 import { radarScale } from '@/lib/contracts'
+import { fmtUnit } from '@/lib/format'
 
 import { LayerSwatch } from './LayerLegend'
 import { Panel, IconButton } from './ui/Panel'
@@ -103,7 +104,7 @@ function DetailScale ({ scale }) {
         </div>
         <div className="mt-0.5 flex items-center justify-between font-mono text-[9.5px] text-muted">
           <span>{scale.min}</span>
-          {scale.unit && <span className="font-sans">{scale.unit}</span>}
+          {scale.unit && <span className="font-sans">{fmtUnit(scale.unit)}</span>}
           <span>{scale.max}</span>
         </div>
       </div>
@@ -119,7 +120,7 @@ function DetailScale ({ scale }) {
       <div className="mt-1.5">
         <div className="mb-1 flex items-center justify-between">
           <span className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-muted">{scale.title}</span>
-          {scale.unit && <span className="font-mono text-[9.5px] text-muted">{scale.unit}</span>}
+          {scale.unit && <span className="font-mono text-[9.5px] text-muted">{fmtUnit(scale.unit)}</span>}
         </div>
         <ul className="grid grid-cols-3 gap-x-2 gap-y-1">
           {scale.classes.map((c, i) => {

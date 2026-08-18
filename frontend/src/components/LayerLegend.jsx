@@ -10,6 +10,8 @@
 // No gradients anywhere is a project rule, and stepped swatches are arguably
 // the more honest rendering of a classed palette anyway.
 
+import { fmtUnit } from '@/lib/format'
+
 const swatchBase = 'h-3.5 w-3.5 shrink-0 rounded-[3px]'
 
 /** The mark that identifies a layer: a fill, an outline, a dash or a dot. */
@@ -94,7 +96,7 @@ function SteppedScale ({ colors, min, max, unit }) {
       </div>
       <div className="mt-1 flex items-center justify-between font-mono text-[10px] text-muted">
         <span>{min}</span>
-        {unit && <span className="font-sans text-[10px]">{unit}</span>}
+        {unit && <span className="font-sans text-[10px]">{fmtUnit(unit)}</span>}
         <span>{max}</span>
       </div>
     </div>

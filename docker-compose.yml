@@ -101,6 +101,12 @@ services:
       PMD_USER: ${PMD_USER:-}
       PMD_PASS: ${PMD_PASS:-}
       PMD_VERIFY_TLS: ${PMD_VERIFY_TLS:-false}
+      # Daily automatic forecast ingest, so the timeline tracks the current date
+      # without a manual run. Idle unless PMD is configured above.
+      INGEST_SCHEDULE_ENABLED: ${INGEST_SCHEDULE_ENABLED:-true}
+      INGEST_SCHEDULE_HOUR_UTC: ${INGEST_SCHEDULE_HOUR_UTC:-20}
+      INGEST_CATCHUP_ON_START: ${INGEST_CATCHUP_ON_START:-true}
+      INGEST_MODEL: ${INGEST_MODEL:-}
       AOI_WEST: ${AOI_WEST:-59}
       AOI_SOUTH: ${AOI_SOUTH:-22}
       AOI_EAST: ${AOI_EAST:-79}

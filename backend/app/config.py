@@ -68,6 +68,21 @@ class Settings(BaseSettings):
     def pmd_configured(self) -> bool:
         return bool(self.pmd_base and self.pmd_user and self.pmd_pass)
 
+    # Daily forecast ingest.
+    #
+    # The PMD ingest pulls whatever cycle is latest on the portal, but has always
+    # been a manual command, so the timeline only advances when someone runs it.
+    # These drive an in-process scheduler (see services/ingest_scheduler.py) that
+    # runs it once a day, and once at startup if the newest catalogued cycle is
+    # not already today's, so the slider tracks the current date on its own. It
+    # only ever runs when PMD is configured; otherwise it stays idle.
+    ingest_schedule_enabled: bool = True
+    ingest_schedule_hour_utc: int = 20
+    ingest_catchup_on_start: bool = True
+    # Restrict the daily run to one model (a data_type like GRAPES or a contract
+    # id like grapes). Blank means every model in the contract.
+    ingest_model: str = ""
+
     # Pakistan bounding box, used to clip at the source. A global GFS file is
     # around 500 MB, clipped to this it is a few megabytes.
     aoi_west: float = 59.0

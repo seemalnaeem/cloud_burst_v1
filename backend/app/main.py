@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.db import pool
 from app.routers import alerts, districts, events, health, meta, raster, score
+from app.services import ingest_scheduler
 from app.shared import contracts
 from app.shared.errors import AppError
 from app.shared.logging import configure_logging, logger
@@ -36,10 +37,16 @@ async def lifespan(app: FastAPI):
     logger.info("contracts_loaded")
 
     await pool.connect()
+
+    # Keep the forecast timeline current on its own: a daily PMD ingest, plus a
+    # catch-up at boot if the newest cycle is not already today's.
+    ingest_scheduler.start()
+
     logger.info("startup_complete", port=settings.api_port)
 
     yield
 
+    await ingest_scheduler.stop()
     await pool.disconnect()
     logger.info("shutdown_complete")
 

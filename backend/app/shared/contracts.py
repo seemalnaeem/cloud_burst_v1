@@ -90,6 +90,10 @@ def basemaps() -> dict:
     return load("basemaps")
 
 
+def radar() -> dict:
+    return load("radar")
+
+
 def time_model() -> dict:
     return load("time")
 

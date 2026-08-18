@@ -75,6 +75,18 @@ async def palettes() -> dict:
     return contracts.palettes()
 
 
+@router.get("/radar")
+async def radar() -> dict:
+    """The radar catalogue: sites, products and legend ramps.
+
+    Static configuration only. The live frame URLs are discovered and proxied by
+    the gateway at /api/upstream/radar, since they carry a timestamp that changes
+    every few minutes. The legends here are our own colour ramps, not the
+    source's legend images.
+    """
+    return contracts.radar()
+
+
 @router.get("/models")
 async def models() -> dict:
     """The three scoring models, so the UI can render thresholds and legends

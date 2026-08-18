@@ -1,0 +1,98 @@
+{
+  "$comment": "Real-time weather radar from the Pakistan Meteorological Department (radar.weather.gov.pk). Two sites, three products each. Frames are discovered live by the gateway from the site's directory listing (the newest file per product folder, chosen by the timestamp embedded in its name) and proxied, so the browser only ever talks to this stack. Centre coordinates and range drive the image placement; legends are rebuilt here as our own colour ramps rather than the source's legend PNGs.",
+  "attribution": "Pakistan Meteorological Department radar",
+  "source": "radar.weather.gov.pk",
+  "refreshSeconds": 180,
+  "pathPrefix": "images/radar",
+  "sites": [
+    {
+      "id": "islamabad",
+      "label": "Islamabad",
+      "$comment": "Radar at 33 40 57 N, 073 03 51 E (from the frame filename), 591 m.",
+      "center": { "lat": 33.6825, "lon": 73.0642 }
+    },
+    {
+      "id": "karachi",
+      "label": "Karachi",
+      "$comment": "Radar at 24 55 41 N, 067 08 37 E, 102 m.",
+      "center": { "lat": 24.9281, "lon": 67.1436 }
+    }
+  ],
+  "products": [
+    {
+      "id": "surface",
+      "label": "Surface-R",
+      "description": "Surface rainfall intensity",
+      "folder": "068",
+      "suffix": "sri",
+      "rangeKm": 450,
+      "legend": "rainfallRate"
+    },
+    {
+      "id": "cappi",
+      "label": "CAPPI-R (1 km)",
+      "description": "Constant-altitude reflectivity at 1 km",
+      "folder": "046",
+      "suffix": "cappi_R_01km",
+      "rangeKm": 200,
+      "legend": "rainfallRate"
+    },
+    {
+      "id": "accum",
+      "label": "Accumulated-R (12 h)",
+      "description": "Rainfall accumulated over 12 hours",
+      "folder": "074",
+      "suffix": "rain_12h",
+      "rangeKm": 450,
+      "legend": "rainfall12h"
+    }
+  ],
+  "legends": {
+    "$comment": "The imagery is a DISCRETE, classified product (not continuous), so each pixel is one of these colours and reads as a value band, not an exact number. Colours are sampled from the source legend colour bars and verified against live frames; `value` is the band's lower threshold in the given unit, the way the source lists them (value <= reading), high to low. A row's range runs from its own threshold up to the next higher one; the top row is open-ended.",
+    "rainfallRate": {
+      "title": "Rainfall rate",
+      "unit": "mm/hr",
+      "classes": [
+        { "color": "#9900cc", "value": "233" },
+        { "color": "#cc0071", "value": "206" },
+        { "color": "#e00048", "value": "162" },
+        { "color": "#ff1c00", "value": "100" },
+        { "color": "#fd8113", "value": "78" },
+        { "color": "#ffa600", "value": "61" },
+        { "color": "#ffd800", "value": "43" },
+        { "color": "#fcfe4d", "value": "30" },
+        { "color": "#05e033", "value": "21" },
+        { "color": "#57fa23", "value": "16" },
+        { "color": "#a7fa84", "value": "10" },
+        { "color": "#0745f8", "value": "8" },
+        { "color": "#026df8", "value": "6" },
+        { "color": "#0097ff", "value": "5" },
+        { "color": "#66d4fb", "value": "4" },
+        { "color": "#51f2ff", "value": "2" },
+        { "color": "#a7ffff", "value": "1" }
+      ]
+    },
+    "rainfall12h": {
+      "title": "12 h rainfall",
+      "unit": "mm",
+      "classes": [
+        { "color": "#9900cc", "value": "360" },
+        { "color": "#561238", "value": "300" },
+        { "color": "#bb4040", "value": "200" },
+        { "color": "#ff1c00", "value": "120" },
+        { "color": "#fd8113", "value": "80" },
+        { "color": "#ffa600", "value": "50" },
+        { "color": "#ffd800", "value": "35" },
+        { "color": "#fcfe4d", "value": "20" },
+        { "color": "#05e033", "value": "15" },
+        { "color": "#57fa23", "value": "10" },
+        { "color": "#90ee90", "value": "6" },
+        { "color": "#0000ff", "value": "4" },
+        { "color": "#0097ff", "value": "2.5" },
+        { "color": "#66d4fb", "value": "1.5" },
+        { "color": "#b2e9fd", "value": "0.5" },
+        { "color": "#e6e6fa", "value": "0.2" }
+      ]
+    }
+  }
+}

@@ -22,9 +22,9 @@ import { getWindField } from '@/lib/api'
 import { mapboxToken, styleUrl } from '@/lib/basemaps'
 import {
   DEFAULT_CENTER, DEFAULT_ZOOM,
-  addRasterLayer, addVectorLayer, applyLayerOrder, layerIdsFor, paintByScore,
-  raiseSelectionOutlines, removeRasterLayer, resetPaint, setLayerOpacity, setLayerVisible,
-  setRasterOpacity, setRasterTime
+  addRadarImage, addRasterLayer, addVectorLayer, applyLayerOrder, layerIdsFor, paintByScore,
+  raiseSelectionOutlines, removeRadarImage, removeRasterLayer, resetPaint, setLayerOpacity,
+  setLayerVisible, setRasterOpacity, setRasterTime
 } from '@/lib/map'
 import { removeWindBarbs, setWindBarbs } from '@/lib/windBarbs'
 
@@ -56,6 +56,8 @@ export default function MapView ({
   computedTimes = {},
   identify = false,
   choropleth = null,
+  radarOverlays = [],
+  radarRingColor,
   selection = null,
   layerOrder = null,
   onIdentify,
@@ -71,6 +73,8 @@ export default function MapView ({
   const barbAbortRef = useRef(null)
   const renderBarbsRef = useRef(null)
   const applyChoroplethRef = useRef(null)
+  const applyRadarRef = useRef(null)
+  const radarOnMapRef = useRef(new Set())
   const applyOrderRef = useRef(null)
   const paintedRef = useRef(new Set())
   const [ready, setReady] = useState(false)
@@ -149,6 +153,10 @@ export default function MapView ({
       applyOrderRef.current?.()
       renderBarbsRef.current?.()
       applyChoroplethRef.current?.()
+      // A style rebuild drops the image sources too; forget what was on the map so
+      // the radar effect re-adds every active frame rather than skipping them.
+      radarOnMapRef.current = new Set()
+      applyRadarRef.current?.()
       setReady(true)
       onMapReady?.(map)
     })
@@ -464,6 +472,45 @@ export default function MapView ({
     applyChoroplethRef.current = apply
     apply()
   }, [ready, choropleth, layers])
+
+  // ------------------------------------------------------------------- radar
+  //
+  // Live radar frames are image overlays, reconciled against the desired set:
+  // add a newly toggled layer, swap the picture when a frame refreshes, and drop
+  // one that was turned off. Stashed in a ref so the style.load handler can put
+  // every active frame back after a basemap change, which wipes image sources.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+
+    const apply = () => {
+      const m = mapRef.current
+      if (!m || !m.getStyle()) return
+
+      const want = new Map(radarOverlays.map((o) => [o.id, o]))
+      for (const id of radarOnMapRef.current) {
+        if (!want.has(id)) {
+          removeRadarImage(m, id)
+          radarOnMapRef.current.delete(id)
+        }
+      }
+      for (const o of radarOverlays) {
+        // addRadarImage adds on first sight and swaps the image on later calls, so
+        // a refreshed frame updates in place without dropping the layer.
+        addRadarImage(m, o.id, {
+          imageUrl: o.imageUrl,
+          coordinates: o.coordinates,
+          opacity: o.opacity ?? 0.85,
+          ring: o.ring,
+          ringColor: radarRingColor
+        })
+        radarOnMapRef.current.add(o.id)
+      }
+    }
+
+    applyRadarRef.current = apply
+    apply()
+  }, [ready, radarOverlays, radarRingColor])
 
   // ------------------------------------------------------------- layer order
   //

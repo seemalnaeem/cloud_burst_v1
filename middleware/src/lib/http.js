@@ -62,6 +62,18 @@ export async function getJson (url, options = {}) {
   return res.body.json()
 }
 
+export async function getText (url, options = {}) {
+  const res = await call(url, options)
+  const allowed = options.allowStatus ?? []
+
+  if (res.statusCode >= 400 && !allowed.includes(res.statusCode)) {
+    const text = await res.body.text().catch(() => '')
+    logger.warn({ url, status: res.statusCode, body: text.slice(0, 500) }, 'upstream error')
+    throw new AppError('UPSTREAM_ERROR', `Upstream returned ${res.statusCode}.`, { url })
+  }
+  return res.body.text()
+}
+
 /**
  * Stream an upstream response through.
  *
@@ -82,4 +94,4 @@ export async function stream (url, options = {}) {
   return res
 }
 
-export const http = { getJson, stream }
+export const http = { getJson, getText, stream }

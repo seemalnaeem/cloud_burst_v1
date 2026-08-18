@@ -358,6 +358,83 @@ export function setRasterTime (map, def, { creationTime, leadHours } = {}) {
   if (src?.setTiles) src.setTiles([rasterTemplate(def, { creationTime, leadHours })])
 }
 
+// ------------------------------------------------------------------- radar
+//
+// Radar frames are single georeferenced PNGs, not tiles, so they ride on an
+// image source pinned to four corners rather than a tile template. The frame
+// refreshes every few minutes; updateImage swaps the picture on the live source
+// without dropping the layer or its place in the stack. Like the other rasters
+// they sit beneath the vector layers so boundaries and labels read over them.
+// The range ring is the coverage circle the source draws around each site, drawn
+// here as our own line rather than baked into the image.
+
+const radarKey = (id) => id.replace(/[^a-z0-9]/gi, '-')
+const radarSrcId = (id) => `src-radar-${radarKey(id)}`
+const radarLayerId = (id) => `radar-${radarKey(id)}`
+const radarRingSrcId = (id) => `src-radarring-${radarKey(id)}`
+const radarRingLayerId = (id) => `radarring-${radarKey(id)}`
+
+export function addRadarImage (map, id, { imageUrl, coordinates, opacity = 0.85, ring = null, ringColor }) {
+  const src = radarSrcId(id)
+  if (map.getSource(src)) {
+    updateRadarImage(map, id, { imageUrl, coordinates })
+  } else {
+    map.addSource(src, { type: 'image', url: imageUrl, coordinates })
+    const first = map.getStyle().layers.find((l) => l.id.endsWith('-fill') || l.id.endsWith('-circle'))
+    map.addLayer(
+      {
+        id: radarLayerId(id),
+        type: 'raster',
+        source: src,
+        paint: { 'raster-opacity': opacity, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' }
+      },
+      first?.id
+    )
+  }
+  if (ring) setRadarRing(map, id, ring, ringColor)
+}
+
+export function updateRadarImage (map, id, { imageUrl, coordinates }) {
+  const src = map.getSource(radarSrcId(id))
+  if (!src?.updateImage) return
+  src.updateImage(coordinates ? { url: imageUrl, coordinates } : { url: imageUrl })
+}
+
+export function setRadarOpacity (map, id, opacity) {
+  const layer = radarLayerId(id)
+  if (map.getLayer(layer)) map.setPaintProperty(layer, 'raster-opacity', opacity)
+}
+
+export function removeRadarImage (map, id) {
+  if (map.getLayer(radarLayerId(id))) map.removeLayer(radarLayerId(id))
+  if (map.getSource(radarSrcId(id))) map.removeSource(radarSrcId(id))
+  removeRadarRing(map, id)
+}
+
+export function setRadarRing (map, id, geojson, color = 'rgba(20,24,31,0.6)') {
+  const src = radarRingSrcId(id)
+  const layer = radarRingLayerId(id)
+  if (map.getSource(src)) {
+    map.getSource(src).setData(geojson)
+    // The colour follows the basemap (white over a dark style, dark otherwise),
+    // so an existing ring repaints rather than keeping its first colour.
+    if (map.getLayer(layer)) map.setPaintProperty(layer, 'line-color', color)
+    return
+  }
+  map.addSource(src, { type: 'geojson', data: geojson })
+  map.addLayer({
+    id: layer,
+    type: 'line',
+    source: src,
+    paint: { 'line-color': color, 'line-width': 1.5, 'line-opacity': 0.75 }
+  })
+}
+
+export function removeRadarRing (map, id) {
+  if (map.getLayer(radarRingLayerId(id))) map.removeLayer(radarRingLayerId(id))
+  if (map.getSource(radarRingSrcId(id))) map.removeSource(radarRingSrcId(id))
+}
+
 export function setLayerVisible (map, def, visible) {
   layerIdsFor(def).forEach((id) => {
     if (map.getLayer(id)) {

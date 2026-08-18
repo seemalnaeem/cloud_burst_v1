@@ -23,6 +23,8 @@ import {
   TbChevronRight, TbChevronDown, TbCheck, TbViewfinder, TbGripVertical, TbRadar2
 } from 'react-icons/tb'
 
+import { radarScale } from '@/lib/contracts'
+
 import { LayerSwatch } from './LayerLegend'
 import { Panel, IconButton } from './ui/Panel'
 
@@ -108,6 +110,33 @@ function DetailScale ({ scale }) {
     )
   }
 
+  // A source-style classified legend. The product is binned, so each colour is a
+  // value band, not a point: a row's range runs from its own threshold up to the
+  // next higher one, and the top row is open ended. Three to a row keeps the
+  // ranges readable while still fitting without scroll; the unit is in the header.
+  if (scale.kind === 'levels') {
+    return (
+      <div className="mt-1.5">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-muted">{scale.title}</span>
+          {scale.unit && <span className="font-mono text-[9.5px] text-muted">{scale.unit}</span>}
+        </div>
+        <ul className="grid grid-cols-3 gap-x-2 gap-y-1">
+          {scale.classes.map((c, i) => {
+            const upper = scale.classes[i - 1]?.value
+            const range = i === 0 ? `≥${c.value}` : `${c.value}–${upper}`
+            return (
+              <li key={`${c.value}-${c.color}`} className="flex items-center gap-1.5">
+                <span className="h-2.5 w-3 shrink-0 rounded-[2px]" style={{ background: c.color, border: '1px solid rgba(16,24,40,0.14)' }} />
+                <span className="min-w-0 flex-1 font-mono text-[9.5px] tabular-nums text-text-2">{range}</span>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+    )
+  }
+
   return null
 }
 
@@ -149,7 +178,7 @@ function LayerRow ({ layer, visible, onToggle, onZoom, count, scale, opacity, on
 
   const mark = scale?.kind === 'steps'
     ? <RampChip colors={scale.colors} />
-    : scale?.kind === 'classes'
+    : (scale?.kind === 'classes' || scale?.kind === 'levels')
       ? <RampChip colors={scale.classes.map((c) => c.color)} />
       : <LayerSwatch color={layer.color} render={layer.legend?.render} />
 
@@ -493,7 +522,11 @@ function ForecastRow ({ element, activeDef, levels, activeLevel, onLevel, visibl
 // sits under the name where it is read alongside it, always visible rather than
 // tucked behind a chevron. A quiet "scoring" note rides the row while the layer
 // is still being computed.
-function CariLayerRow ({ layer, visible, onToggle, classes, status }) {
+function CariLayerRow ({ layer, visible, onToggle, classes, status, warm }) {
+  // The current lead is scoring: the prominent pill. Otherwise, if the timeline
+  // is still warming other leads in the background, a quieter progress readout so
+  // it is clear the whole slider is being made instant, not stuck.
+  const warming = warm && warm.total > 0 && warm.ready < warm.total
   return (
     <li className="border-b border-border/60 last:border-b-0">
       <div className="flex h-9 items-center gap-1.5 px-2">
@@ -513,6 +546,15 @@ function CariLayerRow ({ layer, visible, onToggle, classes, status }) {
             Scoring
           </span>
         )}
+        {visible && status !== 'computing' && warming && (
+          <span
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-panel-2 px-2 py-[3px] text-[10.5px] font-medium text-muted"
+            title="Scoring the rest of the timeline so every hour is instant"
+          >
+            <span className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />
+            Timeline {warm.ready}/{warm.total}
+          </span>
+        )}
         <Toggle checked={visible} onChange={onToggle} color={layer.color} label={`Toggle ${layer.label}`} />
       </div>
 
@@ -530,6 +572,119 @@ function CariLayerRow ({ layer, visible, onToggle, classes, status }) {
         </ul>
       )}
     </li>
+  )
+}
+
+// Group the flat radar layer list into its sites, order preserved, so a single
+// site view lists just that site's three products.
+function radarSites (layers) {
+  const order = []
+  const bySite = new Map()
+  for (const l of layers) {
+    if (!bySite.has(l.site)) {
+      bySite.set(l.site, { id: l.site, label: l.siteLabel, layers: [] })
+      order.push(l.site)
+    }
+    bySite.get(l.site).layers.push(l)
+  }
+  return order.map((id) => bySite.get(id))
+}
+
+// Group by product across sites, so the both-sites view shows one row per
+// product whose toggle drives that product at every site at once, rather than
+// repeating the three products under a heading per site.
+function radarProducts (layers) {
+  const order = []
+  const byProduct = new Map()
+  for (const l of layers) {
+    if (!byProduct.has(l.product)) {
+      byProduct.set(l.product, {
+        product: l.product, label: l.label, description: l.description,
+        rangeKm: l.rangeKm, legend: l.legend, ids: []
+      })
+      order.push(l.product)
+    }
+    byProduct.get(l.product).ids.push(l.id)
+  }
+  return order.map((p) => byProduct.get(p))
+}
+
+// A radar site picker, the same custom listbox the forecast model selector uses,
+// so choosing Islamabad or Karachi reads the same as choosing a model. It picks
+// which site's products the panel shows; a product stays drawn once toggled,
+// whichever site is on screen.
+function RadarSiteSelect ({ sites, value, onSelect }) {
+  const [open, setOpen] = useState(false)
+  const [rect, setRect] = useState(null)
+  const btnRef = useRef(null)
+  const current = sites.find((s) => s.id === value) ?? sites[0]
+
+  useEffect(() => {
+    if (!open) return
+    setRect(btnRef.current?.getBoundingClientRect() ?? null)
+    const close = () => setOpen(false)
+    const onDoc = (e) => {
+      if (btnRef.current?.contains(e.target)) return
+      if (e.target.closest?.('[data-radar-menu]')) return
+      setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDoc)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('pointerdown', onDoc)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
+  return (
+    <div>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Radar site"
+        className={`flex w-full cursor-pointer items-center gap-2 rounded-cb-sm border px-2.5 py-1.5 text-left transition-colors ${
+          open ? 'border-primary bg-primary-soft' : 'border-border bg-panel-2 hover:border-border-strong'
+        }`}
+      >
+        <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted">Site</span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-text">{current?.label}</span>
+        <TbChevronDown className={`shrink-0 text-[13px] text-muted transition-transform duration-200 ${open ? 'rotate-180' : ''}`} aria-hidden />
+      </button>
+
+      {open && rect && createPortal(
+        <ul
+          data-radar-menu
+          role="listbox"
+          aria-label="Radar site"
+          style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, width: rect.width, boxShadow: '0 8px 24px rgba(16,24,40,0.16)' }}
+          className="z-[60] overflow-hidden rounded-cb-sm border border-border bg-panel"
+        >
+          {sites.map((s) => {
+            const active = s.id === (current?.id)
+            return (
+              <li key={s.id} role="option" aria-selected={active}>
+                <button
+                  type="button"
+                  onClick={() => { onSelect(s.id); setOpen(false) }}
+                  className={`flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-[12px] transition-colors ${
+                    active ? 'bg-primary-soft font-semibold text-primary' : 'text-text-2 hover:bg-panel-2 hover:text-text'
+                  }`}
+                >
+                  <span className="min-w-0 flex-1 truncate">{s.label}</span>
+                  {active && <TbCheck className="shrink-0 text-[12px]" aria-hidden />}
+                </button>
+              </li>
+            )
+          })}
+        </ul>,
+        document.body
+      )}
+    </div>
   )
 }
 
@@ -580,13 +735,64 @@ export default function LayersPanel ({
   view = 'map',
   cariLayers = [],
   cariClasses = [],
-  cariStatus = {}
+  cariStatus = {},
+  cariWarm = {},
+  radarLayers = [],
+  onRadarSite,
+  onSetLayers
 }) {
   // Drag reorder for the boundary layers, in the Boundaries section below. The
   // list order is the map stacking, so dropping one row onto another moves that
   // layer in the stack. The handlers are handed to each boundary row.
   const [dragIndex, setDragIndex] = useState(null)
   const [overIndex, setOverIndex] = useState(null)
+  // Which radar site the panel is showing: both at once, or one at a time. A
+  // single selector, like the forecast model picker. Choosing a single site
+  // prunes the other site's layers from the map, so its imagery cannot linger
+  // unseen while its controls are hidden.
+  const radarSiteGroups = radarSites(radarLayers)
+  const radarProductGroups = radarProducts(radarLayers)
+  const [radarSiteId, setRadarSiteId] = useState('both')
+  const radarSiteOptions = [{ id: 'both', label: 'Both sites' }, ...radarSiteGroups]
+  const showBothRadar = radarSiteId === 'both'
+  const shownRadarSites = showBothRadar ? radarSiteGroups : radarSiteGroups.filter((s) => s.id === radarSiteId)
+  const selectRadarSite = (id) => {
+    setRadarSiteId(id)
+    onRadarSite?.(id)
+  }
+  const radarMid = (scale) => scale?.classes?.[Math.floor((scale.classes.length - 1) / 2)]?.color ?? '#64748b'
+  // One product, one site: a plain per-layer toggle.
+  const renderRadarRow = (l) => {
+    const scale = radarScale(l)
+    return (
+      <LayerRow
+        key={l.id}
+        layer={{ label: l.label, color: radarMid(scale), legend: { description: `${l.description} · ${l.rangeKm} km` } }}
+        visible={visibleLayers.has(l.id)}
+        onToggle={() => onToggleLayer(l.id)}
+        scale={scale}
+        temporal={false}
+        defaultOpen
+      />
+    )
+  }
+  // One product across both sites: a single toggle that drives every site's
+  // layer for that product together.
+  const renderRadarProductRow = (p) => {
+    const scale = radarScale(p)
+    const allOn = p.ids.every((id) => visibleLayers.has(id))
+    return (
+      <LayerRow
+        key={p.product}
+        layer={{ label: p.label, color: radarMid(scale), legend: { description: `${p.description} · ${p.rangeKm} km` } }}
+        visible={allOn}
+        onToggle={() => onSetLayers?.(p.ids, !allOn)}
+        scale={scale}
+        temporal={false}
+        defaultOpen
+      />
+    )
+  }
   const dropReorder = (to) => {
     const from = dragIndex
     setDragIndex(null)
@@ -706,10 +912,26 @@ export default function LayersPanel ({
       }
     >
       {view === 'radar' ? (
-        <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-          <TbRadar2 className="text-2xl text-muted" aria-hidden />
-          <p className="text-[12px] text-muted">Radar controls are coming soon.</p>
-        </div>
+        radarSiteGroups.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+            <TbRadar2 className="text-2xl text-muted" aria-hidden />
+            <p className="text-[12px] text-muted">No radar sites are configured.</p>
+          </div>
+        ) : (
+          <div>
+            <div className="border-b border-border bg-panel-2 px-2 py-2">
+              <RadarSiteSelect sites={radarSiteOptions} value={radarSiteId} onSelect={selectRadarSite} />
+            </div>
+            {showBothRadar ? (
+              <ul>{radarProductGroups.map((p) => renderRadarProductRow(p))}</ul>
+            ) : (
+              <ul>{(shownRadarSites[0]?.layers ?? []).map((l) => renderRadarRow(l))}</ul>
+            )}
+            <p className="px-3 py-2 text-[10px] leading-snug text-muted">
+              Live imagery from the Pakistan Meteorological Department, refreshed automatically.
+            </p>
+          </div>
+        )
       ) : !hasBody ? (
         <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
           <TbLayersOff className="text-2xl text-muted" aria-hidden />
@@ -741,6 +963,7 @@ export default function LayersPanel ({
                   onToggle={() => onToggleLayer(l.id)}
                   classes={cariClasses}
                   status={cariStatus[l.id]}
+                  warm={cariWarm[l.id]}
                 />
               ))}
             </Section>

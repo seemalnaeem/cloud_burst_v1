@@ -7,7 +7,7 @@
 // clicks in their margins are the usual way this goes wrong.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { TbAlertTriangle, TbCloudStorm, TbRadar2 } from 'react-icons/tb'
+import { TbAlertTriangle, TbCloudStorm } from 'react-icons/tb'
 
 import CariCard from '@/components/CariCard'
 import EventCard from '@/components/EventCard'
@@ -21,6 +21,8 @@ import StatusBanner from '@/components/StatusBanner'
 import TimeSlider from '@/components/TimeSlider'
 import MapView from '@/features/map/MapView'
 import { useCariChoropleth } from '@/hooks/useCariChoropleth'
+import { useWarmTimeline } from '@/hooks/useWarmTimeline'
+import { useRadarFrames } from '@/hooks/useRadarFrames'
 import { useContracts } from '@/hooks/useContracts'
 import { useComputedRasters } from '@/hooks/useComputedRasters'
 import { useForecast } from '@/hooks/useForecast'
@@ -28,7 +30,8 @@ import { useRasterAvailability } from '@/hooks/useRasterAvailability'
 import { useTheme } from '@/hooks/useTheme'
 import { getLayerExtent, getRasterPoint } from '@/lib/api'
 import { availableBasemaps, defaultBasemapId, findBasemap, hasMapboxToken } from '@/lib/basemaps'
-import { cariClasses, contracts, rasterScale } from '@/lib/contracts'
+import { cariClasses, contracts, radarBounds, radarLayers, radarRing, radarScale, rasterScale } from '@/lib/contracts'
+import { matchRadarBand, radarBandRange, sampleRadarPixel } from '@/lib/radarSample'
 import { DEFAULT_BOUNDS, fitToBounds, fitToExtent } from '@/lib/map'
 import { getStored, setStored } from '@/lib/storage'
 
@@ -170,9 +173,8 @@ export default function App () {
   // here), what a click does (a CARI card here, an attribute card elsewhere) and
   // how the timeline is labelled.
   const analysis = view === 'analysis'
-  // Radar is a placeholder tab for now: the map stays, a note marks it as not
-  // yet wired. It scores and behaves like the Map view until the radar logic
-  // lands, so nothing else keys off it.
+  // The Radar tab draws its own image overlays but otherwise leaves the map as
+  // is; this flag only keeps the forecast charts out of the way while it is open.
   const radar = view === 'radar'
 
   const cariLayerDefs = useMemo(
@@ -223,6 +225,70 @@ export default function App () {
     for (const c of cariLayerDefs) out[c.id] = choroplethData[c.kind]?.status
     return out
   }, [cariLayerDefs, choroplethData])
+
+  // Warm the whole timeline for every visible administrative layer, in the
+  // background, so stepping the slider lands on a cache hit rather than a fresh
+  // pass. Only while the Analysis tab is open, and only for kinds turned on.
+  const warmProgress = useWarmTimeline(analysis ? activeCariKinds : [], analysis)
+  const cariWarm = useMemo(() => {
+    const out = {}
+    for (const c of cariLayerDefs) out[c.id] = warmProgress[c.kind]
+    return out
+  }, [cariLayerDefs, warmProgress])
+
+  // Radar layers are a static catalogue (two sites, three products each). A
+  // toggled-on layer draws in every tab, like the rest; only the toggles live in
+  // the Radar tab. The live frame comes from the gateway, refreshed on a timer,
+  // and each is pinned to its coverage square with a coverage ring.
+  const radarLayerDefs = useMemo(() => (ready ? radarLayers() : []), [ready])
+  const activeRadarLayers = useMemo(
+    () => radarLayerDefs.filter((l) => visibleLayers.has(l.id)),
+    [radarLayerDefs, visibleLayers]
+  )
+  // Picking a single site drops the other site's radar layers, so its imagery
+  // cannot stay on the map after its controls are hidden. "Both" leaves them be.
+  const selectRadarSite = useCallback((siteId) => {
+    if (siteId === 'both') return
+    setVisibleLayers((current) => {
+      const next = new Set(current)
+      for (const l of radarLayerDefs) {
+        if (l.site !== siteId) next.delete(l.id)
+      }
+      return next
+    })
+  }, [radarLayerDefs])
+
+  // Set several layers on or off at once, for the both-sites radar toggles that
+  // drive a product at every site together.
+  const setLayersVisible = useCallback((ids, on) => {
+    setVisibleLayers((current) => {
+      const next = new Set(current)
+      for (const id of ids) {
+        if (on) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
+  }, [])
+
+  const radarFrames = useRadarFrames(activeRadarLayers)
+  const radarOverlays = useMemo(
+    () =>
+      activeRadarLayers
+        .map((l) => {
+          const frame = radarFrames[l.id]
+          if (!frame) return null
+          return {
+            id: l.id,
+            imageUrl: frame.imageUrl,
+            coordinates: radarBounds(l.center, l.rangeKm),
+            opacity: opacities[l.id] ?? 0.85,
+            ring: radarRing(l.center, l.rangeKm)
+          }
+        })
+        .filter(Boolean),
+    [activeRadarLayers, radarFrames, opacities]
+  )
 
   // One visibility set for everything, so switching tabs never hides a layer:
   // toggling is the only thing that does.
@@ -381,6 +447,11 @@ export default function App () {
     initialBasemapRef.current = defaultBasemapId(isDark)
   }
   const activeBasemap = basemap ?? initialBasemapRef.current
+  // Radar range rings track the basemap: white over a dark style so they read
+  // against the ground, the usual dark ink over a light one.
+  const radarRingColor = findBasemap(activeBasemap)?.scheme === 'dark'
+    ? 'rgba(255,255,255,0.9)'
+    : 'rgba(20,24,31,0.6)'
 
   const toggleLayer = useCallback((id) => {
     setVisibleLayers((current) => {
@@ -483,6 +554,37 @@ export default function App () {
   // from the map's draw order; everything else, the model, cycle and lead, is
   // what the map is currently showing, so the number matches the pixel.
   const onIdentify = useCallback(async ({ layerId, lng, lat }) => {
+    // Radar takes the click when a visible frame covers the point: the pixel is
+    // read on the client and reported as its band range. Topmost (last drawn)
+    // first, so an overlapping site wins the way it does on the map.
+    for (let k = radarOverlays.length - 1; k >= 0; k--) {
+      const o = radarOverlays[k]
+      const c = o.coordinates
+      const within = lng >= c[0][0] && lng <= c[1][0] && lat <= c[0][1] && lat >= c[2][1]
+      if (!within) continue
+
+      const layerDef = radarLayerDefs.find((l) => l.id === o.id)
+      const scale = radarScale(layerDef)
+      const label = `${layerDef.siteLabel} · ${layerDef.label}`
+      setRasterSelection({ def: { label, color: '#38bdf8' }, lng, lat, status: 'loading' })
+      try {
+        const pixel = await sampleRadarPixel(o.imageUrl, c, lng, lat)
+        const idx = matchRadarBand(pixel, scale.classes)
+        if (idx == null) {
+          setRasterSelection({ def: { label, color: '#94a3b8' }, lng, lat, status: 'ok', valueText: 'No echo' })
+        } else {
+          setRasterSelection({
+            def: { label, color: scale.classes[idx].color },
+            lng, lat, status: 'ok',
+            valueText: radarBandRange(scale.classes, idx), unit: scale.unit, legendTitle: scale.title
+          })
+        }
+      } catch {
+        setRasterSelection({ def: { label, color: '#94a3b8' }, lng, lat, status: 'error' })
+      }
+      return
+    }
+
     const def = rasterLayers.find((l) => l.id === layerId)
     if (!def) {
       setRasterSelection(null)
@@ -523,7 +625,7 @@ export default function App () {
       if (identifyReqRef.current !== reqId) return
       setRasterSelection({ def, lng, lat, status: 'error' })
     }
-  }, [rasterLayers, forecast.creationTime, activeLead, computedTimes, cariClassList])
+  }, [radarOverlays, radarLayerDefs, rasterLayers, forecast.creationTime, activeLead, computedTimes, cariClassList])
 
   if (contractState.status === 'loading') {
     return (
@@ -587,6 +689,8 @@ export default function App () {
           computedTimes={computedTimes}
           identify={!analysis && identify}
           choropleth={cariChoropleth}
+          radarOverlays={radarOverlays}
+          radarRingColor={radarRingColor}
           selection={selection}
           layerOrder={layerOrder}
           onIdentify={onIdentify}
@@ -614,16 +718,6 @@ export default function App () {
           </div>
         )}
 
-        {/* Radar is a placeholder for now. A quiet centred note marks it as not
-            yet wired, over the live map, until the radar layer logic lands. */}
-        {radar && (
-          <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2">
-            <div className="pointer-events-auto flex items-center gap-2 rounded-cb border border-border bg-panel px-3.5 py-2 shadow-cb-lg">
-              <TbRadar2 className="shrink-0 text-[16px] text-primary" aria-hidden />
-              <span className="text-[12px] font-medium text-text-2">Radar view is coming soon</span>
-            </div>
-          </div>
-        )}
 
         {/* Forecast trend chart for a selected boundary, floated over the lower
             map above the timeline. Map view only, and only once a model has
@@ -669,6 +763,10 @@ export default function App () {
                 cariLayers={cariLayerDefs}
                 cariClasses={cariClassList}
                 cariStatus={cariStatus}
+                cariWarm={cariWarm}
+                radarLayers={radarLayerDefs}
+                onRadarSite={selectRadarSite}
+                onSetLayers={setLayersVisible}
               />
             ) : (
               <span />

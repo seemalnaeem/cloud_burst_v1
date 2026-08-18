@@ -32,8 +32,13 @@ export default function RasterPanel ({ selection, onClose }) {
   if (!selection?.def) return null
 
   const { def, lng, lat, status } = selection
-  const hasValue = selection.value !== null && selection.value !== undefined
-  const value = hasValue ? formatValue(selection.value, selection.unit) : null
+  // A radar pixel is a classified band, so it arrives pre-formatted as a range
+  // string rather than a number to run through formatValue.
+  const hasText = selection.valueText != null
+  const hasValue = !hasText && selection.value !== null && selection.value !== undefined
+  const value = hasText
+    ? (selection.unit ? `${selection.valueText} ${selection.unit}` : selection.valueText)
+    : hasValue ? formatValue(selection.value, selection.unit) : null
   const updating = status === 'updating'
 
   return (

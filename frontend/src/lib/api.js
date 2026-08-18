@@ -101,6 +101,15 @@ export const getPalettes = (signal) => api.get('/api/meta/palettes', null, { sig
 export const getModels = (signal) => api.get('/api/meta/models', null, { signal })
 export const getForecastMeta = (model, signal) =>
   api.get('/api/meta/forecast', model ? { model } : null, { signal })
+// The static radar catalogue (sites, products, legends).
+export const getRadar = (signal) => api.get('/api/meta/radar', null, { signal })
+// The newest radar frames for a site, discovered and proxied by the gateway.
+export const getRadarFrames = (site, signal) =>
+  api.get('/api/upstream/radar', { site }, { signal })
+// A radar frame image, proxied through the gateway so the browser never leaves
+// this origin. path is the gateway-supplied allowlisted path.
+export const radarImageUrl = (path) =>
+  `${API_BASE}/api/upstream/radar/image?path=${encodeURIComponent(path)}`
 
 export const getDistricts = (province, signal) =>
   api.get('/api/districts', { province }, { signal })
@@ -120,6 +129,10 @@ export const getCariAll = (forecastHours, matrix, signal) =>
 // runs; the caller polls until ready. kind is "district" or "tehsil".
 export const getCariChoropleth = (kind, forecastHours, signal) =>
   api.get('/api/score/cari/choropleth', { kind, forecast_hours: forecastHours }, { signal })
+// Warm a whole layer's timeline so every slider position is a cache hit. Reports
+// { total, ready, leads } and keeps a background pass filling the rest; poll it.
+export const warmTimeline = (kind, signal) =>
+  api.get('/api/score/cari/warm', { kind }, { signal })
 export const getSusceptibility = (forecastHours, signal) =>
   api.get('/api/score/susceptibility', { forecast_hours: forecastHours }, { signal })
 export const getPrioritized = (top, signal) =>

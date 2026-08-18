@@ -11,14 +11,41 @@
 import { Router } from 'express'
 
 import { config } from '../config.js'
+import { load } from '../lib/contracts.js'
 import { cache } from '../lib/cache.js'
-import { notConfigured } from '../lib/errors.js'
+import { AppError, notConfigured } from '../lib/errors.js'
 import { http } from '../lib/http.js'
 import { upstreamPath } from '../lib/validate.js'
 
 export const upstreamRouter = Router()
 
 const RADAR_PATH_PREFIX = 'images/radar/'
+
+/**
+ * The newest frame in one product directory.
+ *
+ * The site publishes frames into an Apache autoindex, one file per scan, named
+ * with a fixed prefix and a YYYYMMDDHHMM timestamp: because the prefix is
+ * constant per site and product, the lexicographically largest filename is the
+ * newest scan. There is no manifest to read; the listing is the manifest.
+ */
+async function latestFrame (base, prefix, site, product) {
+  const dir = `${base}/${prefix}/${site}/${product.folder}/`
+  const html = await http.getText(dir, { timeoutMs: 30000 })
+
+  const names = (html.match(/[A-Za-z0-9_]+\.png/g) || []).filter((n) => n.startsWith(`${site}_`))
+  if (!names.length) return null
+
+  const filename = names.sort().at(-1)
+  const stamp = filename.match(/_(\d{12})_/)
+  return {
+    product: product.id,
+    label: product.label,
+    rangeKm: product.rangeKm,
+    timestamp: stamp ? stamp[1] : null,
+    path: `${prefix}/${site}/${product.folder}/${filename}`
+  }
+}
 
 upstreamRouter.get('/status', (req, res) => {
   res.setHeader('Cache-Control', config.cacheControl.none)
@@ -33,10 +60,13 @@ upstreamRouter.get('/status', (req, res) => {
 })
 
 /**
- * Radar frame manifest.
+ * Latest radar frames for a site, one per product.
  *
- * Cached briefly. Radar refreshes every few minutes, so a long TTL would show
- * stale weather and a zero TTL would hammer the upstream.
+ * Discovered live from the source's directory listing and cached briefly: radar
+ * refreshes every few minutes, so a long TTL would show stale weather and a zero
+ * TTL would hammer the upstream. The response carries a proxied image path per
+ * product, so the browser loads every frame through this gateway, never the
+ * source directly.
  */
 upstreamRouter.get('/radar', async (req, res, next) => {
   try {
@@ -44,18 +74,28 @@ upstreamRouter.get('/radar', async (req, res, next) => {
       throw notConfigured('UPSTREAM_PMD_RADAR_BASE', 'radar imagery')
     }
 
+    const contract = load('radar')
     const site = String(req.query.site || 'islamabad')
-    const product = String(req.query.product || 'Surface-R')
+    if (!contract.sites.some((s) => s.id === site)) {
+      throw new AppError('VALIDATION_FAILED', `Unknown radar site ${site}. See /api/meta/radar.`)
+    }
 
-    const manifest = await cache.wrap(
+    const frames = await cache.wrap(
       'radar',
-      { site, product },
-      () => http.getJson(`${config.external.pmdRadarBase}/radar-images-${site}.json`, { timeoutMs: 30000 }),
+      { site },
+      async () => {
+        const settled = await Promise.all(
+          contract.products.map((p) =>
+            latestFrame(config.external.pmdRadarBase, contract.pathPrefix, site, p).catch(() => null)
+          )
+        )
+        return settled.filter(Boolean)
+      },
       { ttlSeconds: 120 }
     )
 
     res.setHeader('Cache-Control', 'public, max-age=120')
-    res.json({ site, product, manifest })
+    res.json({ site, frames })
   } catch (err) {
     next(err)
   }

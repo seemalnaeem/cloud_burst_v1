@@ -10,11 +10,12 @@
 
 import { useEffect, useState } from 'react'
 import {
-  TbCloudStorm, TbMap2, TbCloud, TbChartBar, TbSun, TbMoon,
+  TbMap2, TbCloud, TbChartBar, TbSun, TbMoon,
   TbMenu2, TbRadar2
 } from 'react-icons/tb'
 
 import { IconButton } from './ui/Panel'
+import ndmaLogo from '@/assets/ndma_logo.webp'
 
 // Map first, then the two analytical views, Radar last. Radar carries the alerts
 // once its logic lands, so there is no separate alerts tab.
@@ -60,12 +61,7 @@ export default function Navbar ({ view, onView, isDark, onToggleTheme, onToggleS
 
       {/* Identity */}
       <div className="flex min-w-0 items-center gap-2.5">
-        <span
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-cb-sm"
-          style={{ background: 'rgba(255,255,255,0.12)' }}
-        >
-          <TbCloudStorm className="text-[20px] text-cream" aria-hidden />
-        </span>
+        <img src={ndmaLogo} alt="NDMA" className="h-9 w-9 shrink-0 object-contain" />
         <div className="min-w-0 leading-tight">
           <h1 className="truncate text-[15px] font-bold tracking-tight text-cream">
             Convective Activity Risk System
@@ -89,7 +85,7 @@ export default function Navbar ({ view, onView, isDark, onToggleTheme, onToggleS
               type="button"
               onClick={() => onView(v.id)}
               aria-current={active ? 'page' : undefined}
-              className="flex items-center gap-1.5 rounded-[7px] px-3 py-1.5 text-[12.5px] font-medium transition-colors duration-150"
+              className="flex cursor-pointer items-center gap-1.5 rounded-[7px] px-3 py-1.5 text-[12.5px] font-medium transition-colors duration-150"
               style={
                 active
                   ? { background: 'var(--cb-cream)', color: 'var(--cb-teal)' }

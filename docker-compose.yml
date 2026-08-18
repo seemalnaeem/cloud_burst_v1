@@ -144,6 +144,12 @@ services:
       CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-21600}
       CACHE_PRUNE_DAYS: ${CACHE_PRUNE_DAYS:-10}
       UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-180000}
+      # PMD radar is public and anonymous, so it defaults on. The gateway lists
+      # its directories for the newest frame and proxies the image; blank the
+      # variable to turn the radar routes back to 501.
+      UPSTREAM_PMD_RADAR_BASE: ${UPSTREAM_PMD_RADAR_BASE:-https://radar.weather.gov.pk/jbirds}
+      UPSTREAM_PMD_PRESS_BASE: ${UPSTREAM_PMD_PRESS_BASE:-}
+      UPSTREAM_USER_AGENT: ${UPSTREAM_USER_AGENT:-Mozilla/5.0 (compatible; CloudBurstDev/1.0)}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TZ: ${TZ:-Asia/Karachi}
     ports:

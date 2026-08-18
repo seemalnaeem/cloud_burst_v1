@@ -6,7 +6,7 @@
 // reason for it are read in the same place. Districts and tehsils share this one
 // card; only which endpoint is called differs.
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { TbCloudStorm, TbX } from 'react-icons/tb'
 
 import { useAsync } from '@/hooks/useAsync'
@@ -45,41 +45,54 @@ export default function CariCard ({ selection, leadHours, onClose }) {
     { enabled: Boolean(feature?.key) }
   )
 
+  // The score currently on screen. Stepping the timeline refetches, but rather
+  // than collapse the whole card to a loading bar each slot, the last result is
+  // held and its numbers update in place when the next lands, so the card looks
+  // steady. Cleared when the selected feature changes, where a clean load is
+  // right: a new district should not briefly wear the previous one's score.
+  const [shown, setShown] = useState(null)
+  useEffect(() => { setShown(null) }, [feature?.kind, feature?.key])
+  useEffect(() => {
+    if (cari.isReady && cari.data) setShown(cari.data)
+  }, [cari.isReady, cari.data])
+
   if (!feature) return null
 
   return (
     <Panel
       title={<span className="normal-case">CAR Index</span>}
       icon={TbCloudStorm}
-      accent={cari.data?.riskColor}
+      accent={shown?.riskColor}
       className="max-h-[calc(100vh-7rem)] w-[300px]"
       bodyClassName="px-3 py-3"
       actions={<IconButton icon={TbX} label="Close" size="sm" tone="ghost" onClick={onClose} />}
     >
-      <Body feature={feature} cari={cari} />
+      <Body feature={feature} shown={shown} cari={cari} />
     </Panel>
   )
 }
 
-function Body ({ feature, cari }) {
-  if (cari.isLoading || (!cari.data && !cari.isError)) {
+function Body ({ feature, shown, cari }) {
+  // No held score yet: this is the first load of the selected feature (or it
+  // errored before any result). Once a score is held, a lead change keeps it on
+  // screen and only its numbers change, so the card never collapses mid-scrub.
+  if (!shown) {
+    if (cari.isError) {
+      const pending = cari.error.code === 'NOT_CONFIGURED'
+      return (
+        <div className={`rounded-cb-sm border px-3 py-2.5 text-[11.5px] leading-snug ${
+          pending ? 'border-amber-border bg-amber-soft text-amber' : 'border-danger-border bg-danger-soft text-danger'
+        }`}
+        >
+          <p className="font-semibold">{pending ? 'Not scored yet' : 'Could not score this feature'}</p>
+          <p className="mt-0.5 opacity-90">{cari.error.message}</p>
+        </div>
+      )
+    }
     return <LoadingBar label={`Scoring ${feature.label}…`} />
   }
 
-  if (cari.isError) {
-    const pending = cari.error.code === 'NOT_CONFIGURED'
-    return (
-      <div className={`rounded-cb-sm border px-3 py-2.5 text-[11.5px] leading-snug ${
-        pending ? 'border-amber-border bg-amber-soft text-amber' : 'border-danger-border bg-danger-soft text-danger'
-      }`}
-      >
-        <p className="font-semibold">{pending ? 'Not scored yet' : 'Could not score this feature'}</p>
-        <p className="mt-0.5 opacity-90">{cari.error.message}</p>
-      </div>
-    )
-  }
-
-  const result = cari.data
+  const result = shown
 
   return (
     <div className="space-y-3">

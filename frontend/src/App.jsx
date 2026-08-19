@@ -11,6 +11,7 @@ import { TbAlertTriangle, TbCloudStorm } from 'react-icons/tb'
 
 import CariCard from '@/components/CariCard'
 import EventCard from '@/components/EventCard'
+import AlertsPanel from '@/components/AlertsPanel'
 import FeaturePanel from '@/components/FeaturePanel'
 import ForecastChartPanel from '@/components/ForecastChartPanel'
 import LayersPanel from '@/components/LayersPanel'
@@ -333,6 +334,26 @@ export default function App () {
     }
     return codes
   }, [alertProvinces, alertProvincesOn])
+
+  // The PMD advisory has no per-district prose, only one sentence per region, so
+  // each alert card carries that district's own CARI instead as its distinct
+  // signal. Scored for the same lead the Analysis timeline shows, keyed by the
+  // district name (the CARI join key). Only fetched while the Analysis tab is open
+  // and an advisory is present.
+  const alertCariData = useCariChoropleth(
+    analysis && alertProvinces.length ? ['district'] : [],
+    analysis ? activeLead : null
+  )
+  const alertCari = useMemo(() => {
+    const entry = alertCariData.district
+    if (entry?.status !== 'ready') return {}
+    const out = {}
+    for (const f of entry.features) {
+      const cls = cariClassList[f.classIdx]
+      out[f.name] = { cari: f.cari, className: cls?.name ?? null, color: cls?.textColor ?? cls?.color ?? null }
+    }
+    return out
+  }, [alertCariData, cariClassList])
 
   // The shared animation timeline: one grid across the active radar layers, and
   // what each layer paints at each step. Products scan on their own phase and
@@ -876,6 +897,22 @@ export default function App () {
               initialLayerId={chartInitialLayerId}
               isDark={isDark}
               onClose={() => setChartRegion(null)}
+            />
+          </div>
+        )}
+
+        {/* Standing Alerts panel, Analysis tab only. Anchored to the bottom-right
+            corner with the same 12px gap the nav controls keep at the top right,
+            so the two align on the right edge. Its own layer, and it shrinks to
+            the viewport on a narrow screen. */}
+        {analysis && (
+          <div className="pointer-events-none absolute bottom-3 right-3 z-20">
+            <AlertsPanel
+              release={alertRelease}
+              provinces={alertProvinces}
+              cari={alertCari}
+              configured={alertConfigured}
+              error={alertError}
             />
           </div>
         )}

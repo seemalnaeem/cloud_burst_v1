@@ -249,6 +249,41 @@ textarea {
   }
 }
 
+/* Alerts carousel. A region's district cards scroll up slowly through a fixed
+   window (the end offset is measured and set on --cb-vscroll-end), and each
+   region enters with a short slide from the right so switching regions reads as a
+   swipe. Reduced motion holds the list still and skips the swipe. */
+@keyframes cb-vscroll {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(var(--cb-vscroll-end, 0));
+  }
+}
+@keyframes cb-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.cb-slide-in {
+  animation: cb-slide-in 420ms ease both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-vscroll-track {
+    animation: none !important;
+    transform: none !important;
+  }
+  .cb-slide-in {
+    animation: none;
+  }
+}
+
 /* Mapbox GL's own chrome, all of it suppressed. Navigation is replaced by our
    themed MapControls, and the scale bar, the attribution control and the
    wordmark are off at the project owner's request.

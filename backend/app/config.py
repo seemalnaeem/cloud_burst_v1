@@ -77,7 +77,9 @@ class Settings(BaseSettings):
     # not already today's, so the slider tracks the current date on its own. It
     # only ever runs when PMD is configured; otherwise it stays idle.
     ingest_schedule_enabled: bool = True
-    ingest_schedule_hour_utc: int = 20
+    # Local (Pakistan) hour of the daily run. The portal publishes the day's cycle
+    # by early morning, so 06:00 PKT picks it up. PKT is a fixed UTC+5, no DST.
+    ingest_schedule_hour_pkt: int = 6
     ingest_catchup_on_start: bool = True
     # Restrict the daily run to one model (a data_type like GRAPES or a contract
     # id like grapes). Blank means every model in the contract.

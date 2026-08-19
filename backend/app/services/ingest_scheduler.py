@@ -28,6 +28,9 @@ INGEST_SCRIPT = "/app/ingest/ingest_pmd.py"
 # Back off this long after an unexpected loop error so a persistent failure logs
 # hourly rather than spinning.
 ERROR_BACKOFF_S = 3600
+# Pakistan Standard Time is a fixed UTC+5 with no daylight saving, so the daily
+# run fires at the same local hour year round.
+PKT = timezone(timedelta(hours=5))
 
 _task: asyncio.Task | None = None
 # One ingest at a time within this process: the daily run and the startup
@@ -76,9 +79,10 @@ async def _run_ingest(reason: str) -> None:
             logger.error("ingest_failed", reason=reason, code=proc.returncode, tail=tail)
 
 
-def _seconds_until_next_run(now: datetime) -> float:
+def _seconds_until_next_run(now_utc: datetime) -> float:
+    now = now_utc.astimezone(PKT)
     target = now.replace(
-        hour=settings.ingest_schedule_hour_utc, minute=0, second=0, microsecond=0
+        hour=settings.ingest_schedule_hour_pkt, minute=0, second=0, microsecond=0
     )
     if target <= now:
         target += timedelta(days=1)
@@ -122,7 +126,7 @@ def start() -> None:
         logger.info("ingest_scheduler_idle_not_configured")
         return
     _task = asyncio.create_task(_loop())
-    logger.info("ingest_scheduler_started", hour_utc=settings.ingest_schedule_hour_utc)
+    logger.info("ingest_scheduler_started", hour_pkt=settings.ingest_schedule_hour_pkt)
 
 
 async def stop() -> None:

@@ -72,6 +72,19 @@ function Splash ({ children }) {
   )
 }
 
+// A transient banner that clears itself after a few seconds. The compute errors
+// it wraps are usually a lead whose inputs are mid-ingest; they resolve on their
+// own, so the notice should not sit on the map. Keyed by content upstream, so a
+// genuinely new error mounts a fresh instance and shows again.
+function AutoDismiss ({ ms = 5000, children }) {
+  const [shown, setShown] = useState(true)
+  useEffect(() => {
+    const t = setTimeout(() => setShown(false), ms)
+    return () => clearTimeout(t)
+  }, [ms])
+  return shown ? children : null
+}
+
 export default function App () {
   const contractState = useContracts()
   const { isDark, toggle: toggleTheme } = useTheme()
@@ -710,10 +723,12 @@ export default function App () {
               </div>
             )}
             {computedErrors.map((e) => (
-              <div key={e.label} className="flex max-w-[26rem] items-start gap-2 rounded-cb border border-danger-border bg-danger-soft px-3.5 py-2 shadow-cb-lg">
-                <TbAlertTriangle className="mt-[1px] shrink-0 text-[15px] text-danger" aria-hidden />
-                <span className="text-[12px] text-danger"><span className="font-semibold">{e.label}</span> {e.message}</span>
-              </div>
+              <AutoDismiss key={`${e.label}:${e.message}`}>
+                <div className="flex max-w-[26rem] items-start gap-2 rounded-cb border border-danger-border bg-danger-soft px-3.5 py-2 shadow-cb-lg">
+                  <TbAlertTriangle className="mt-[1px] shrink-0 text-[15px] text-danger" aria-hidden />
+                  <span className="text-[12px] text-danger"><span className="font-semibold">{e.label}</span> {e.message}</span>
+                </div>
+              </AutoDismiss>
             ))}
           </div>
         )}

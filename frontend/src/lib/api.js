@@ -111,6 +111,11 @@ export const getRadarFrames = (site, signal) =>
 export const radarImageUrl = (path) =>
   `${API_BASE}/api/upstream/radar/image?path=${encodeURIComponent(path)}`
 
+// The High-Alert Districts advisory: the latest RAIN-WIND press release parsed by
+// the gateway into districts bucketed by province.
+export const getAdvisories = (type = 'RAIN-WIND', signal) =>
+  api.get('/api/upstream/advisories', { type }, { signal })
+
 export const getDistricts = (province, signal) =>
   api.get('/api/districts', { province }, { signal })
 export const getDistrict = (name, signal) =>

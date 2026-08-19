@@ -44,6 +44,9 @@ export function layerIdsFor (def) {
 // it and the outline is a thin full opacity line of it, drawn on its own top
 // layer so it is never painted over: colour carries the selection, not weight.
 const SELECT_COLOR = '#e11d1d'
+// The high-alert pulse red, a touch brighter than the selection maroon so a
+// flashing alert district and a clicked one read as two different things.
+const ALERT_COLOR = '#ef4444'
 const SELECT_OUTLINE_WIDTH = 2.2  // thin, but always on top so always visible
 const SELECT_FILL_MAP = 0.32      // over the light Map view fill
 const SELECT_FILL_ANALYSIS = 0.72 // matches the choropleth density in Analysis
@@ -64,11 +67,23 @@ function fillColorExpr (baseColor) {
 // transparent until the polygon is selected, when it takes the red selection
 // wash. Hover is shown on the outline, not with a fill. Shared by addVectorLayer
 // and resetPaint so a return from the choropleth restores the same behaviour.
-function fillOpacityExpr () {
+function fillOpacityExpr (base = 0) {
   return [
     'case',
     ['boolean', ['feature-state', 'selected'], false], SELECT_FILL_MAP,
-    0
+    base
+  ]
+}
+
+// The zoom curve for a point layer's radius, shared by addVectorLayer and the
+// live style setter so a size change reproduces the same curve rather than a flat
+// radius. baseR is the radius at mid zoom.
+function circleRadiusExpr (baseR) {
+  return [
+    'interpolate', ['linear'], ['zoom'],
+    4, baseR * 0.7,
+    10, baseR,
+    14, baseR * 1.5
   ]
 }
 
@@ -106,12 +121,7 @@ export function addVectorLayer (map, def, visible) {
           // with feature-state; doing so renders once and then drops the layer the
           // moment the zoom changes. Hover and selection are shown on the ring and
           // the opacity instead, which are feature-state only.
-          'circle-radius': [
-            'interpolate', ['linear'], ['zoom'],
-            4, baseR * 0.7,
-            10, baseR,
-            14, baseR * 1.5
-          ],
+          'circle-radius': circleRadiusExpr(baseR),
           'circle-color': def.color,
           // A white ring keeps every dot legible over a dark basemap and the
           // terrain, and thickens to mark hover and selection.
@@ -172,7 +182,7 @@ export function addVectorLayer (map, def, visible) {
         // without re-rendering the source, which on the districts is the
         // difference between smooth and visibly stuttering.
         'fill-color': fillColorExpr(def.color),
-        'fill-opacity': fillOpacityExpr()
+        'fill-opacity': fillOpacityExpr(paint.fillOpacity ?? 0)
       }
     })
   }
@@ -261,6 +271,45 @@ export function applyLayerOrder (map, orderedDefsTopFirst) {
     }
   }
   raiseSelectionOutlines(map)
+  // The high-alert outline rides above even the selection outlines, so a
+  // reordering of the boundaries never buries the flashing districts.
+  if (map.getLayer(ALERT_OUTLINE_ID)) map.moveLayer(ALERT_OUTLINE_ID)
+}
+
+// ------------------------------------------------------- high-alert outline
+//
+// The pulsing red outline over the districts named in the latest advisory. It is
+// one line layer on the districts' own vector source, filtered to the alert
+// codes, so it reuses tiles already loaded rather than fetching anything. The
+// pulse (width and opacity) is driven from MapView on an animation frame; this
+// only adds, refilters or removes the layer.
+export const ALERT_OUTLINE_ID = 'alert-outline'
+
+export function setAlertOutline (map, def, codes) {
+  if (!map || !map.getStyle() || !def) return
+  const exists = map.getLayer(ALERT_OUTLINE_ID)
+  if (!codes || codes.length === 0) {
+    if (exists) map.removeLayer(ALERT_OUTLINE_ID)
+    return
+  }
+  if (!map.getSource(sourceId(def.id))) return
+  const filter = ['in', ['get', 'district_code'], ['literal', codes]]
+  if (exists) {
+    map.setFilter(ALERT_OUTLINE_ID, filter)
+  } else {
+    map.addLayer({
+      id: ALERT_OUTLINE_ID,
+      type: 'line',
+      source: sourceId(def.id),
+      'source-layer': def.sourceLayer,
+      filter,
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': ALERT_COLOR, 'line-width': 1.8, 'line-opacity': 0.9, 'line-blur': 0.3 }
+    })
+  }
+  // A high alert must not be buried under the fill or another boundary, so it is
+  // lifted to the very top every time it is (re)applied.
+  map.moveLayer(ALERT_OUTLINE_ID)
 }
 
 export const rasterId = (layerId) => `raster-${layerId}`
@@ -553,7 +602,47 @@ export function resetPaint (map, def) {
   // Restore the feature-state expressions, not flat values, so hover and the
   // maroon selection keep working after a return from the Analysis choropleth.
   map.setPaintProperty(id, 'fill-color', fillColorExpr(def.color))
-  map.setPaintProperty(id, 'fill-opacity', fillOpacityExpr())
+  map.setPaintProperty(id, 'fill-opacity', fillOpacityExpr(def.paint?.fillOpacity ?? 0))
+}
+
+/**
+ * Reapply a vector layer's style from its (possibly user-overridden) def.
+ *
+ * addVectorLayer paints only on first add, so a live colour, width or fill change
+ * has to set the paint again on the layers already on the map. Feature-state
+ * stays inside the expressions, so hover and the maroon selection keep working.
+ * The fill it sets is the plain fill; in Analysis the choropleth effect runs after
+ * this and re-overrides the fill with the score, so the two do not fight.
+ */
+export function applyVectorStyle (map, def) {
+  if (!map || !map.getStyle()) return
+  const paint = def.paint ?? {}
+
+  if (def.geometryType === 'point') {
+    const c = circleId(def.id)
+    if (map.getLayer(c)) {
+      map.setPaintProperty(c, 'circle-color', def.color)
+      map.setPaintProperty(c, 'circle-radius', circleRadiusExpr(paint.circleRadius ?? 6))
+    }
+    return
+  }
+
+  const f = fillId(def.id)
+  if (map.getLayer(f)) {
+    map.setPaintProperty(f, 'fill-color', fillColorExpr(def.color))
+    map.setPaintProperty(f, 'fill-opacity', fillOpacityExpr(paint.fillOpacity ?? 0))
+  }
+  const l = lineId(def.id)
+  if (map.getLayer(l)) {
+    const w = paint.lineWidth ?? 1
+    map.setPaintProperty(l, 'line-color', def.color)
+    map.setPaintProperty(l, 'line-width', [
+      'case',
+      ['boolean', ['feature-state', 'hover'], false], w + 0.5,
+      w
+    ])
+    if (paint.lineDasharray) map.setPaintProperty(l, 'line-dasharray', paint.lineDasharray)
+  }
 }
 
 export function fitToBounds (map, bounds, padding = 48) {

@@ -22,9 +22,9 @@ import { getWindField } from '@/lib/api'
 import { mapboxToken, styleUrl } from '@/lib/basemaps'
 import {
   DEFAULT_CENTER, DEFAULT_ZOOM,
-  addRadarImage, addRasterLayer, addVectorLayer, applyLayerOrder, layerIdsFor, paintByScore,
-  raiseSelectionOutlines, removeRadarImage, removeRasterLayer, resetPaint, setLayerOpacity,
-  setLayerVisible, setRasterOpacity, setRasterTime
+  addRadarImage, addRasterLayer, addVectorLayer, applyLayerOrder, applyVectorStyle, ALERT_OUTLINE_ID,
+  layerIdsFor, paintByScore, raiseSelectionOutlines, removeRadarImage, removeRasterLayer, resetPaint,
+  setAlertOutline, setLayerOpacity, setLayerVisible, setRasterOpacity, setRasterTime
 } from '@/lib/map'
 import { removeWindBarbs, setWindBarbs } from '@/lib/windBarbs'
 
@@ -58,6 +58,7 @@ export default function MapView ({
   choropleth = null,
   radarOverlays = [],
   radarRingColor,
+  alertDistrictCodes = [],
   selection = null,
   layerOrder = null,
   onIdentify,
@@ -151,12 +152,14 @@ export default function MapView ({
       // put back too. Each effect below owns the latest render and stashes it in a
       // ref for exactly this.
       applyOrderRef.current?.()
+      applyStylesRef.current?.()
       renderBarbsRef.current?.()
       applyChoroplethRef.current?.()
       // A style rebuild drops the image sources too; forget what was on the map so
       // the radar effect re-adds every active frame rather than skipping them.
       radarOnMapRef.current = new Set()
       applyRadarRef.current?.()
+      applyAlertRef.current?.()
       setReady(true)
       onMapReady?.(map)
     })
@@ -351,6 +354,20 @@ export default function MapView ({
     })
   }, [ready, layers, opacities])
 
+  // Live style edits (the swatch editor) change a layer's colour, outline and
+  // fill on its def; reapply them to the layers already on the map. Runs before
+  // the choropleth effect below, so in Analysis the choropleth still wins the
+  // fill; everywhere else the user's style stands. Stashed so a basemap rebuild
+  // can reapply it from style.load after the layers are re-added.
+  const applyStylesRef = useRef(null)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    const apply = () => layers.forEach((def) => applyVectorStyle(mapRef.current, def))
+    applyStylesRef.current = apply
+    apply()
+  }, [ready, layers])
+
   // ------------------------------------------------------------- rasters
   //
   // Added and removed rather than hidden. A raster layer left on the map with
@@ -515,6 +532,45 @@ export default function MapView ({
     applyRadarRef.current = apply
     apply()
   }, [ready, radarOverlays, radarRingColor])
+
+  // ------------------------------------------------------------- high alert
+  //
+  // The districts named in the latest advisory, outlined in a red that breathes.
+  // One line layer on the districts' own source, filtered to the active codes and
+  // animated on a frame loop. Stashed so a basemap rebuild can put it back from
+  // style.load; the loop keeps running and repaints it the moment it returns.
+  const applyAlertRef = useRef(null)
+  const alertRafRef = useRef(null)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    const def = layers.find((l) => l.id === 'pak_districts')
+    const apply = () => setAlertOutline(mapRef.current, def, alertDistrictCodes)
+    applyAlertRef.current = apply
+    apply()
+
+    if (alertRafRef.current) { cancelAnimationFrame(alertRafRef.current); alertRafRef.current = null }
+    if (alertDistrictCodes.length) {
+      const start = performance.now()
+      const tick = (t) => {
+        const m = mapRef.current
+        if (!m) return
+        if (m.getLayer(ALERT_OUTLINE_ID)) {
+          // A slow sine, roughly a 3 second breath, on both width and opacity so
+          // the outline reads as an active alert without strobing. Both keep a
+          // floor so the boundary never fully vanishes at the low point.
+          const phase = (Math.sin((t - start) / 500) + 1) / 2
+          m.setPaintProperty(ALERT_OUTLINE_ID, 'line-width', 1.6 + phase * 1.4)
+          m.setPaintProperty(ALERT_OUTLINE_ID, 'line-opacity', 0.6 + phase * 0.4)
+        }
+        alertRafRef.current = requestAnimationFrame(tick)
+      }
+      alertRafRef.current = requestAnimationFrame(tick)
+    }
+    return () => {
+      if (alertRafRef.current) { cancelAnimationFrame(alertRafRef.current); alertRafRef.current = null }
+    }
+  }, [ready, layers, alertDistrictCodes])
 
   // ------------------------------------------------------------- layer order
   //

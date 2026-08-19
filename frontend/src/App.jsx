@@ -23,6 +23,7 @@ import TimeSlider from '@/components/TimeSlider'
 import MapView from '@/features/map/MapView'
 import { useCariChoropleth } from '@/hooks/useCariChoropleth'
 import { useWarmTimeline } from '@/hooks/useWarmTimeline'
+import { useAdvisories } from '@/hooks/useAdvisories'
 import { useRadarFrames } from '@/hooks/useRadarFrames'
 import { useContracts } from '@/hooks/useContracts'
 import { useComputedRasters } from '@/hooks/useComputedRasters'
@@ -64,6 +65,9 @@ const REGION_KIND = { pak_districts: 'district', pak_tehsils: 'tehsil', iiojk_di
 // already carried by the ordinary districts layer, so a separate toggle only
 // duplicates them.
 const HIDDEN_LAYERS = new Set(['iiojk_districts'])
+// A stable empty list so the map's alert effect does not re-run every render when
+// the overlay is off (outside the Analysis tab).
+const NO_ALERT_CODES = []
 
 function Splash ({ children }) {
   return (
@@ -104,6 +108,9 @@ export default function App () {
   const [layersCollapsed, setLayersCollapsed] = useState(false)
   // The vector layers' stacking, top-first (index 0 draws on top of the map).
   const [layerOrder, setLayerOrder] = useState(() => getStored('layerOrder', null))
+  // Per-layer style overrides (colour, outline, fill), keyed by layer id. Merged
+  // into the contract def so the map, the swatch and reset all read one def.
+  const [layerStyles, setLayerStyles] = useState(() => getStored('layerStyles', {}))
   const [panelsOpen, setPanelsOpen] = useState(true)
   const [leadIndex, setLeadIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -301,6 +308,32 @@ export default function App () {
 
   const { frames: radarFrames, error: radarError } = useRadarFrames(activeRadarLayers)
 
+  // High-Alert Districts: the latest PMD rain-wind advisory, polled and matched to
+  // our districts by the gateway. The overlay and its province toggles live in the
+  // Analysis tab; the poll runs regardless so the data is ready when it opens.
+  const {
+    release: alertRelease, provinces: alertProvinces,
+    error: alertError, configured: alertConfigured
+  } = useAdvisories()
+  const [alertProvincesOn, setAlertProvincesOn] = useState(() => new Set())
+  const toggleAlertProvince = useCallback((province) => {
+    setAlertProvincesOn((s) => {
+      const next = new Set(s)
+      if (next.has(province)) next.delete(province)
+      else next.add(province)
+      return next
+    })
+  }, [])
+  // The district codes currently flashing: every on province's districts. Fed to
+  // the map only in the Analysis tab.
+  const alertDistrictCodes = useMemo(() => {
+    const codes = []
+    for (const p of alertProvinces) {
+      if (alertProvincesOn.has(p.province)) for (const d of p.districts) codes.push(d.code)
+    }
+    return codes
+  }, [alertProvinces, alertProvincesOn])
+
   // The shared animation timeline: one grid across the active radar layers, and
   // what each layer paints at each step. Products scan on their own phase and
   // cadence, and the two sites' feeds can cover different windows (one may have
@@ -492,14 +525,45 @@ export default function App () {
     })
   }, [ready])
   useEffect(() => { if (layerOrder) setStored('layerOrder', layerOrder) }, [layerOrder])
+  useEffect(() => { setStored('layerStyles', layerStyles) }, [layerStyles])
+
+  const setLayerStyle = useCallback((id, patch) => {
+    setLayerStyles((s) => ({ ...s, [id]: { ...s[id], ...patch } }))
+  }, [])
+  const resetLayerStyle = useCallback((id) => {
+    setLayerStyles((s) => {
+      if (!s[id]) return s
+      const next = { ...s }
+      delete next[id]
+      return next
+    })
+  }, [])
+
+  // The contract defs with any user style override merged in, so the map, the
+  // panel swatch and the feature card all read one overridden def. Only the
+  // touched properties are replaced; the rest of the def is untouched.
+  const styledLayers = useMemo(() => layers.map((l) => {
+    const ov = layerStyles[l.id]
+    if (!ov) return l
+    return {
+      ...l,
+      color: ov.color ?? l.color,
+      paint: {
+        ...l.paint,
+        ...(ov.weight != null ? { lineWidth: ov.weight } : {}),
+        ...(ov.fillOpacity != null ? { fillOpacity: ov.fillOpacity } : {}),
+        ...(ov.radius != null ? { circleRadius: ov.radius } : {})
+      }
+    }
+  }), [layers, layerStyles])
 
   // The vector layers resolved into the current top-first order, for the order
   // dock to list and for the map to stack.
   const orderedVectorDefs = useMemo(() => {
-    const byId = new Map(layers.map((l) => [l.id, l]))
-    const ids = layerOrder ?? [...layers.map((l) => l.id)].reverse()
+    const byId = new Map(styledLayers.map((l) => [l.id, l]))
+    const ids = layerOrder ?? [...styledLayers.map((l) => l.id)].reverse()
     return ids.map((id) => byId.get(id)).filter(Boolean)
-  }, [layerOrder, layers])
+  }, [layerOrder, styledLayers])
 
   // Every model's temporal layers, so the forecast chart can pick a model and
   // then that model's variables, independent of the map's active model.
@@ -740,7 +804,7 @@ export default function App () {
 
       <main className="relative min-h-0 flex-1">
         <MapView
-          layers={layers}
+          layers={styledLayers}
           rasterLayers={rasterLayers}
           visibleLayers={effectiveVisible}
           opacities={opacities}
@@ -753,6 +817,7 @@ export default function App () {
           choropleth={cariChoropleth}
           radarOverlays={radarOverlays}
           radarRingColor={radarRingColor}
+          alertDistrictCodes={analysis ? alertDistrictCodes : NO_ALERT_CODES}
           selection={selection}
           layerOrder={layerOrder}
           onIdentify={onIdentify}
@@ -798,9 +863,9 @@ export default function App () {
 
 
         {/* Forecast trend chart for a selected boundary, floated over the lower
-            map above the timeline. Map view only, and only once a model has
-            temporal layers to chart. */}
-        {!analysis && !radar && chartRegion && chartTemporalLayers.length > 0 && (
+            map above the timeline. Forecast tab only (it is a forecast feature),
+            and only once a model has temporal layers to chart. */}
+        {view === 'forecast' && chartRegion && chartTemporalLayers.length > 0 && (
           <div className="pointer-events-none absolute inset-x-0 bottom-28 z-30 flex justify-center px-3">
             <ForecastChartPanel
               region={chartRegion}
@@ -831,6 +896,15 @@ export default function App () {
                 onShowAll={showAll}
                 onHideAll={() => setVisibleLayers(new Set())}
                 onReorderLayers={setLayerOrder}
+                layerStyles={layerStyles}
+                onStyleLayer={setLayerStyle}
+                onResetLayerStyle={resetLayerStyle}
+                alertRelease={alertRelease}
+                alertProvinces={alertProvinces}
+                alertProvincesOn={alertProvincesOn}
+                onToggleAlertProvince={toggleAlertProvince}
+                alertConfigured={alertConfigured}
+                alertError={alertError}
                 counts={COUNTS}
                 scales={scales}
                 opacities={opacities}
@@ -863,11 +937,17 @@ export default function App () {
               {!analysis && selection && (
                 selection.layer?.id === 'historic_events'
                   ? <EventCard selection={selection} onClose={() => setSelection(null)} />
-                  : <FeaturePanel selection={selection} onClose={() => setSelection(null)} onForecastChart={openForecastChart} />
+                  // The forecast trend is a forecast feature, so its button lives
+                  // only on the Forecast tab's card; the Map/Radar card is plain
+                  // details.
+                  : <FeaturePanel selection={selection} onClose={() => setSelection(null)} onForecastChart={view === 'forecast' ? openForecastChart : undefined} />
               )}
               {!analysis && rasterSelection && (
                 <RasterPanel selection={rasterSelection} onClose={() => setRasterSelection(null)} />
               )}
+              {/* A clicked district in Analysis always shows its CARI score,
+                  high-alert or not. The advisory (AlertCard) will surface from a
+                  dedicated Alerts section later, not from the polygon click. */}
               {analysis && selection && (
                 <CariCard selection={selection} leadHours={activeLead} onClose={() => setSelection(null)} />
               )}

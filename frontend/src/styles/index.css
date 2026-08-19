@@ -192,6 +192,63 @@ textarea {
   }
 }
 
+/* Advisory ticker. The high-alert advisory title can be long, so rather than
+   clamp it to an ellipsis the strip scrolls it slowly, end to end, on a loop.
+   Two identical copies sit side by side and the track translates exactly one
+   copy's width, so the loop is seamless; hovering pauses it so it can be read. */
+.cb-marquee {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.cb-marquee__track {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  width: max-content;
+  animation: cb-marquee-scroll 52s linear infinite;
+}
+.cb-marquee:hover .cb-marquee__track {
+  animation-play-state: paused;
+}
+/* Neutral near-black in light, the foreground token in dark (where black would
+   vanish on the dark strip). line-height 1 with equal padding keeps the glyphs
+   vertically centred rather than sitting high in the strip. */
+.cb-marquee__item {
+  line-height: 1;
+  color: #14171c;
+}
+:root[data-theme='dark'] .cb-marquee__item {
+  color: var(--cb-text);
+}
+/* A bulletin dot closes each phrase before it repeats; its side margins are the
+   gap, so both copies stay identical and the loop is still seamless. */
+.cb-marquee__item::after {
+  content: '\2022';
+  margin: 0 1.4rem;
+  color: var(--cb-danger);
+}
+@keyframes cb-marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-marquee {
+    overflow-x: auto;
+  }
+  .cb-marquee__track {
+    animation: none;
+  }
+  .cb-marquee__item:nth-child(2) {
+    display: none;
+  }
+}
+
 /* Mapbox GL's own chrome, all of it suppressed. Navigation is replaced by our
    themed MapControls, and the scale bar, the attribution control and the
    wordmark are off at the project owner's request.

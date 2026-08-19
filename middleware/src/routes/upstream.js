@@ -11,6 +11,7 @@
 import { Router } from 'express'
 
 import { config } from '../config.js'
+import { buildAdvisory, newestReleaseId } from '../lib/advisories.js'
 import { load } from '../lib/contracts.js'
 import { cache } from '../lib/cache.js'
 import { EMPTY_TILE } from '../lib/emptyTile.js'
@@ -159,10 +160,13 @@ upstreamRouter.get('/radar/image', async (req, res, next) => {
 })
 
 /**
- * Advisory press releases.
+ * High-Alert Districts from the latest press release.
  *
- * Keyed on the release id rather than a time window, so a new release
- * invalidates naturally and an unchanged one is never refetched.
+ * The source is HTML, not an API: a list page of releases, each linking to a
+ * detail page whose free-text body names the at-risk districts. We take the
+ * newest release, match our districts against its body, and return them bucketed
+ * by province (see lib/advisories). Cached briefly so a new release shows within
+ * minutes without refetching two pages on every client poll.
  */
 upstreamRouter.get('/advisories', async (req, res, next) => {
   try {
@@ -170,14 +174,27 @@ upstreamRouter.get('/advisories', async (req, res, next) => {
       throw notConfigured('UPSTREAM_PMD_PRESS_BASE', 'weather advisories')
     }
 
+    const type = String(req.query.type || 'RAIN-WIND')
     const data = await cache.wrap(
       'advisories',
-      { type: String(req.query.type || 'RAIN-WIND') },
-      () => http.getJson(config.external.pmdPressBase, { timeoutMs: 30000 }),
-      { ttlSeconds: 1800 }
+      { type },
+      async () => {
+        const base = config.external.pmdPressBase
+        const listUrl = `${base}?type=${encodeURIComponent(type)}`
+        const listHtml = await http.getText(listUrl, { timeoutMs: 30000 })
+        const id = newestReleaseId(listHtml)
+        if (!id) return { release: null, provinces: [], byCode: {} }
+
+        const detailUrl = `${base}/${id}?type=${encodeURIComponent(type)}`
+        const detailHtml = await http.getText(detailUrl, { timeoutMs: 30000 })
+        const districts = load('districts').districts
+        const lut = load('alert-lut')
+        return buildAdvisory({ listHtml, detailHtml, detailUrl, id }, districts, lut)
+      },
+      { ttlSeconds: 600 }
     )
 
-    res.setHeader('Cache-Control', 'public, max-age=1800')
+    res.setHeader('Cache-Control', 'public, max-age=600')
     res.json(data)
   } catch (err) {
     next(err)

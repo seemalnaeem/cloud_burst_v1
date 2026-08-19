@@ -154,7 +154,9 @@ services:
       # its directories for the newest frame and proxies the image; blank the
       # variable to turn the radar routes back to 501.
       UPSTREAM_PMD_RADAR_BASE: ${UPSTREAM_PMD_RADAR_BASE:-https://radar.weather.gov.pk/jbirds}
-      UPSTREAM_PMD_PRESS_BASE: ${UPSTREAM_PMD_PRESS_BASE:-}
+      # PMD press releases, also public and anonymous, drive the High-Alert
+      # Districts overlay. Blank the variable to turn the advisories route to 501.
+      UPSTREAM_PMD_PRESS_BASE: ${UPSTREAM_PMD_PRESS_BASE:-https://weather.gov.pk/nwfc/all-press-releases}
       UPSTREAM_USER_AGENT: ${UPSTREAM_USER_AGENT:-Mozilla/5.0 (compatible; CloudBurstDev/1.0)}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TZ: ${TZ:-Asia/Karachi}

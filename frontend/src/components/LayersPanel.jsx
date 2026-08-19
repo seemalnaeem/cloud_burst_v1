@@ -27,6 +27,7 @@ import { radarScale } from '@/lib/contracts'
 import { fmtUnit } from '@/lib/format'
 
 import { LayerSwatch } from './LayerLegend'
+import LayerStyleEditor from './LayerStyleEditor'
 import { Panel, IconButton } from './ui/Panel'
 
 // A rod-and-thumb switch: a thin fixed rod with a large thumb that rides along
@@ -172,16 +173,20 @@ function RowDetail ({ description, scale, opacity, onOpacity, color }) {
 // supplied the row grows a drag handle and becomes a drop target, so the
 // boundary layers can be restacked from within the panel: the row's position in
 // the list is its stacking on the map, top of the list on top of the map.
-function LayerRow ({ layer, visible, onToggle, onZoom, count, scale, opacity, onOpacity, unavailable, temporal, reorder, defaultOpen = false }) {
+function LayerRow ({ layer, visible, onToggle, onZoom, count, scale, opacity, onOpacity, unavailable, temporal, reorder, editStyle, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen)
   const disabled = Boolean(unavailable)
   const active = visible && !disabled
 
+  // An editable boundary layer's swatch is a button that opens the style card;
+  // ramp marks (rasters, classed layers) and non-editable rows keep the plain mark.
   const mark = scale?.kind === 'steps'
     ? <RampChip colors={scale.colors} />
     : (scale?.kind === 'classes' || scale?.kind === 'levels')
       ? <RampChip colors={scale.classes.map((c) => c.color)} />
-      : <LayerSwatch color={layer.color} render={layer.legend?.render} />
+      : editStyle
+        ? <LayerStyleEditor layer={layer} override={editStyle.override} onChange={editStyle.onChange} onReset={editStyle.onReset} />
+        : <LayerSwatch color={layer.color} render={layer.legend?.render} />
 
   const description = layer.legend?.description
   const hasDetail = !disabled && Boolean(description || scale || onOpacity)
@@ -723,6 +728,9 @@ export default function LayersPanel ({
   onShowAll,
   onHideAll,
   onReorderLayers,
+  layerStyles = {},
+  onStyleLayer,
+  onResetLayerStyle,
   counts = {},
   scales = {},
   opacities = {},
@@ -740,8 +748,15 @@ export default function LayersPanel ({
   cariWarm = {},
   radarLayers = [],
   onRadarSite,
-  onSetLayers
+  onSetLayers,
+  alertRelease = null,
+  alertProvinces = [],
+  alertProvincesOn,
+  onToggleAlertProvince,
+  alertConfigured = true,
+  alertError = null
 }) {
+  const alertOn = alertProvincesOn ?? new Set()
   // Drag reorder for the boundary layers, in the Boundaries section below. The
   // list order is the map stacking, so dropping one row onto another moves that
   // layer in the stack. The handlers are handed to each boundary row.
@@ -855,8 +870,15 @@ export default function LayersPanel ({
   // the live catalogue, so the field returns on its own the moment it is ingested.
   const availableElements = elementOrder.filter((el) => byElement.get(el).some((v) => availability[v.id]?.ok))
 
-  const genericRow = (layer, withOpacity, temporal, reorder, defaultOpen = false) => {
+  const genericRow = (layer, withOpacity, temporal, reorder, defaultOpen = false, editable = false) => {
     const state = availability[layer.id]
+    const editStyle = editable && onStyleLayer
+      ? {
+          override: layerStyles[layer.id],
+          onChange: (patch) => onStyleLayer(layer.id, patch),
+          onReset: () => onResetLayerStyle(layer.id)
+        }
+      : undefined
     return (
       <LayerRow
         key={layer.id}
@@ -871,6 +893,7 @@ export default function LayersPanel ({
         unavailable={state && !state.ok ? state.reason : null}
         temporal={temporal}
         reorder={reorder}
+        editStyle={editStyle}
         defaultOpen={defaultOpen}
       />
     )
@@ -944,7 +967,7 @@ export default function LayersPanel ({
         <ul>
           {view === 'map' && layers.length > 0 && (
             <Section label="Boundaries" count={layers.length}>
-              {layers.map((l, i) => genericRow(l, false, false, reorderFor(i)))}
+              {layers.map((l, i) => genericRow(l, false, false, reorderFor(i), false, true))}
             </Section>
           )}
 
@@ -976,6 +999,56 @@ export default function LayersPanel ({
                   three classes, which is the point of the layer, so it should not
                   hide behind a chevron in the Analysis tab. */}
               {analysisLayers.map((l) => genericRow(l, true, Boolean(l.temporal), undefined, true))}
+            </Section>
+          )}
+
+          {view === 'analysis' && (
+            <Section label="High-Alert Districts" count={alertProvinces.length || undefined} defaultOpen={false}>
+              {!alertConfigured ? (
+                <li className="px-3 py-3 text-[11px] leading-snug text-muted">The advisory source is not configured.</li>
+              ) : alertProvinces.length === 0 ? (
+                <li className="px-3 py-3 text-[11px] leading-snug text-muted">
+                  {alertError ? 'The advisory feed is unavailable right now.' : 'No active rain-wind advisory right now.'}
+                </li>
+              ) : (
+                <>
+                  {alertRelease?.title && (
+                    <li className="border-b border-border/60 bg-panel-2/50 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.07em] text-danger">PMD rain-wind advisory</p>
+                      {/* A slow scrolling ticker rather than a clamped line, so the
+                          whole advisory is readable without an ellipsis. */}
+                      <div className="cb-marquee mt-1 border-y border-border-strong bg-bg-2 py-[3px]" title={alertRelease.title}>
+                        <div className="cb-marquee__track">
+                          <span className="cb-marquee__item text-[10px] font-normal">{alertRelease.title}</span>
+                          <span className="cb-marquee__item text-[10px] font-normal" aria-hidden="true">{alertRelease.title}</span>
+                        </div>
+                      </div>
+                      {alertRelease.date && <p className="mt-1 text-[10px] text-muted">Issued {alertRelease.date}</p>}
+                    </li>
+                  )}
+                  {alertProvinces.map((p) => {
+                    const on = alertOn.has(p.province)
+                    return (
+                      <li key={p.province} className="border-b border-border/60 last:border-b-0">
+                        <div className="flex h-9 items-center gap-1.5 px-2">
+                          <span className="w-4 shrink-0" />
+                          <span className="grid h-3.5 w-3.5 shrink-0 place-items-center">
+                            <span
+                              className={`h-3 w-3 rounded-full border-2 ${on ? 'animate-pulse' : ''}`}
+                              style={{ borderColor: '#ef4444', background: on ? 'rgba(239,68,68,0.3)' : 'transparent' }}
+                            />
+                          </span>
+                          <span className={`min-w-0 flex-1 truncate text-[12.5px] font-medium ${on ? 'text-text' : 'text-text-2'}`}>
+                            {p.province}
+                          </span>
+                          <span className="shrink-0 font-mono text-[10px] text-muted tabular-nums">{p.districts.length}</span>
+                          <Toggle checked={on} onChange={() => onToggleAlertProvince?.(p.province)} color="#ef4444" label={`Toggle ${p.province} high alert`} />
+                        </div>
+                      </li>
+                    )
+                  })}
+                </>
+              )}
             </Section>
           )}
 

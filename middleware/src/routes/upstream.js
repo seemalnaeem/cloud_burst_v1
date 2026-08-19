@@ -13,6 +13,7 @@ import { Router } from 'express'
 import { config } from '../config.js'
 import { load } from '../lib/contracts.js'
 import { cache } from '../lib/cache.js'
+import { EMPTY_TILE } from '../lib/emptyTile.js'
 import { AppError, notConfigured } from '../lib/errors.js'
 import { http } from '../lib/http.js'
 import { upstreamPath } from '../lib/validate.js'
@@ -22,28 +23,35 @@ export const upstreamRouter = Router()
 const RADAR_PATH_PREFIX = 'images/radar/'
 
 /**
- * The newest frame in one product directory.
+ * Every frame in one product directory, oldest to newest.
  *
  * The site publishes frames into an Apache autoindex, one file per scan, named
- * with a fixed prefix and a YYYYMMDDHHMM timestamp: because the prefix is
- * constant per site and product, the lexicographically largest filename is the
- * newest scan. There is no manifest to read; the listing is the manifest.
+ * with a fixed prefix and a YYYYMMDDHHMM timestamp. There is no manifest to read;
+ * the listing is the manifest. The timestamp sorts lexically as it does
+ * chronologically, so the sorted list is the animation order, and the newest is
+ * simply the last. The whole series is returned so the client can scrub and
+ * animate the loop, not just show the latest scan.
  */
-async function latestFrame (base, prefix, site, product) {
+async function listFrames (base, prefix, site, product) {
   const dir = `${base}/${prefix}/${site}/${product.folder}/`
   const html = await http.getText(dir, { timeoutMs: 30000 })
 
-  const names = (html.match(/[A-Za-z0-9_]+\.png/g) || []).filter((n) => n.startsWith(`${site}_`))
-  if (!names.length) return null
+  const names = [...new Set((html.match(/[A-Za-z0-9_]+\.png/g) || []))].filter((n) => n.startsWith(`${site}_`))
+  const frames = names
+    .map((filename) => {
+      const stamp = filename.match(/_(\d{12})_/)
+      return stamp
+        ? { timestamp: stamp[1], path: `${prefix}/${site}/${product.folder}/${filename}` }
+        : null
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
 
-  const filename = names.sort().at(-1)
-  const stamp = filename.match(/_(\d{12})_/)
   return {
     product: product.id,
     label: product.label,
     rangeKm: product.rangeKm,
-    timestamp: stamp ? stamp[1] : null,
-    path: `${prefix}/${site}/${product.folder}/${filename}`
+    frames
   }
 }
 
@@ -60,13 +68,13 @@ upstreamRouter.get('/status', (req, res) => {
 })
 
 /**
- * Latest radar frames for a site, one per product.
+ * The radar frame series for a site, per product.
  *
  * Discovered live from the source's directory listing and cached briefly: radar
  * refreshes every few minutes, so a long TTL would show stale weather and a zero
- * TTL would hammer the upstream. The response carries a proxied image path per
- * product, so the browser loads every frame through this gateway, never the
- * source directly.
+ * TTL would hammer the upstream. Each product carries its full ordered list of
+ * proxied frame paths, so the client can drive its own animation slider; every
+ * frame loads through this gateway, never the source directly.
  */
 upstreamRouter.get('/radar', async (req, res, next) => {
   try {
@@ -80,13 +88,13 @@ upstreamRouter.get('/radar', async (req, res, next) => {
       throw new AppError('VALIDATION_FAILED', `Unknown radar site ${site}. See /api/meta/radar.`)
     }
 
-    const frames = await cache.wrap(
+    const products = await cache.wrap(
       'radar',
       { site },
       async () => {
         const settled = await Promise.all(
           contract.products.map((p) =>
-            latestFrame(config.external.pmdRadarBase, contract.pathPrefix, site, p).catch(() => null)
+            listFrames(config.external.pmdRadarBase, contract.pathPrefix, site, p).catch(() => null)
           )
         )
         return settled.filter(Boolean)
@@ -95,7 +103,7 @@ upstreamRouter.get('/radar', async (req, res, next) => {
     )
 
     res.setHeader('Cache-Control', 'public, max-age=120')
-    res.json({ site, frames })
+    res.json({ site, products })
   } catch (err) {
     next(err)
   }
@@ -114,9 +122,35 @@ upstreamRouter.get('/radar/image', async (req, res, next) => {
     }
 
     const safePath = upstreamPath(req.query.path, RADAR_PATH_PREFIX)
-    const upstream = await http.stream(`${config.external.pmdRadarBase}/${safePath}`, { timeoutMs: 30000 })
 
-    res.setHeader('Content-Type', upstream.headers['content-type'] || 'image/png')
+    // Radar imagery is best effort. A frame that has rolled off the listing 404s,
+    // and the source is flaky enough that a live frame intermittently 502s or
+    // times out; either way that is one empty frame in a loop, not a reason to
+    // blank the map behind an error banner. Serve a transparent PNG and let the
+    // animation carry on. A real outage still surfaces through the listing route
+    // (/radar), whose failure the client shows as a dismissable toast.
+    let upstream
+    try {
+      upstream = await http.stream(`${config.external.pmdRadarBase}/${safePath}`, {
+        timeoutMs: 30000,
+        allowStatus: [404]
+      })
+    } catch {
+      // A short cache here, not the frame's usual six, so a frame that fails once
+      // and recovers is retried on the next loop rather than stuck empty.
+      res.setHeader('Content-Type', 'image/png')
+      res.setHeader('Cache-Control', 'public, max-age=30')
+      return res.status(200).end(EMPTY_TILE)
+    }
+
+    res.setHeader('Content-Type', 'image/png')
+
+    if (upstream.statusCode === 404) {
+      await upstream.body.dump()
+      res.setHeader('Cache-Control', 'public, max-age=120')
+      return res.status(200).end(EMPTY_TILE)
+    }
+
     res.setHeader('Cache-Control', 'public, max-age=120')
     upstream.body.pipe(res)
   } catch (err) {

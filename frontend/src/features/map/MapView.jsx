@@ -168,6 +168,10 @@ export default function MapView ({
       const message = e?.error?.message || 'Unknown map error'
       const status = e?.error?.status
       if (status === 404) return // an empty vector tile route is normal
+      // Radar frames are best effort: the gateway already serves a transparent
+      // tile for a missing or flaky frame, and the loop has its own toast for a
+      // real outage, so a stray radar source error must not raise this banner.
+      if (e?.sourceId?.startsWith('src-radar-')) return
       setFailure({ message, status, source: e?.sourceId })
     })
 

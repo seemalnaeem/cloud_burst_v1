@@ -16,6 +16,7 @@ import ForecastChartPanel from '@/components/ForecastChartPanel'
 import LayersPanel from '@/components/LayersPanel'
 import MapControls from '@/components/MapControls'
 import Navbar from '@/components/Navbar'
+import RadarTimeSlider, { buildRadarTimeline } from '@/components/RadarTimeSlider'
 import RasterPanel from '@/components/RasterPanel'
 import StatusBanner from '@/components/StatusBanner'
 import TimeSlider from '@/components/TimeSlider'
@@ -298,28 +299,76 @@ export default function App () {
     })
   }, [])
 
-  const radarFrames = useRadarFrames(activeRadarLayers)
+  const { frames: radarFrames, error: radarError } = useRadarFrames(activeRadarLayers)
+
+  // The shared animation timeline: one grid across the active radar layers, and
+  // what each layer paints at each step. Products scan on their own phase and
+  // cadence, and the two sites' feeds can cover different windows (one may have
+  // stalled), so this snaps every scan onto a common step, drops steps no layer
+  // scanned, and blanks a layer whose feed has gone stale rather than smearing an
+  // old frame. See buildRadarTimeline.
+  const radarTimeline = useMemo(
+    () => buildRadarTimeline(activeRadarLayers, radarFrames),
+    [activeRadarLayers, radarFrames]
+  )
+  const radarTicks = radarTimeline.ticks
+  const radarTimes = useMemo(() => radarTicks.map((ms) => new Date(ms)), [radarTicks])
+  const radarProductLabels = useMemo(
+    () => [...new Set(activeRadarLayers.map((l) => l.label))],
+    [activeRadarLayers]
+  )
+
+  const [radarIndex, setRadarIndex] = useState(0)
+  const radarLenRef = useRef(0)
+  useEffect(() => {
+    const len = radarTicks.length
+    if (len === 0) { radarLenRef.current = 0; return }
+    // Jump to the live edge the first time frames arrive; after that hold the
+    // user's position, clamped, so a refresh appending a step does not yank it.
+    if (radarLenRef.current === 0) setRadarIndex(len - 1)
+    else setRadarIndex((i) => Math.min(i, len - 1))
+    radarLenRef.current = len
+  }, [radarTicks.length])
+
+  // The step each overlay should show: the slider's in the Radar tab, the live
+  // edge otherwise (radar layers draw in every tab, but only the Radar tab scrubs
+  // them).
+  const radarStep = radarTicks.length
+    ? (radar ? Math.min(radarIndex, radarTicks.length - 1) : radarTicks.length - 1)
+    : -1
+
   const radarOverlays = useMemo(
     () =>
       activeRadarLayers
         .map((l) => {
-          const frame = radarFrames[l.id]
-          if (!frame) return null
+          const imageUrl = radarStep >= 0 ? radarTimeline.shown[l.id]?.[radarStep] : null
+          if (!imageUrl) return null
           return {
             id: l.id,
-            imageUrl: frame.imageUrl,
+            imageUrl,
             coordinates: radarBounds(l.center, l.rangeKm),
             opacity: opacities[l.id] ?? 0.85,
             ring: radarRing(l.center, l.rangeKm)
           }
         })
         .filter(Boolean),
-    [activeRadarLayers, radarFrames, opacities]
+    [activeRadarLayers, radarTimeline, radarStep, opacities]
   )
 
   // One visibility set for everything, so switching tabs never hides a layer:
-  // toggling is the only thing that does.
-  const effectiveVisible = visibleLayers
+  // toggling is the only thing that does. The Radar tab is the exception: it runs
+  // its own scan-time animation, so the forecast timeline does not apply there.
+  // Time-bound raster layers (forecast fields, the computed products) are dropped
+  // from the map while it is open, but static layers with no time (admin
+  // boundaries, DEM, slope) stay, since they are unaffected by the timeline. The
+  // stored set is untouched, so leaving the tab restores them.
+  const effectiveVisible = useMemo(() => {
+    if (!radar) return visibleLayers
+    const temporalIds = new Set(rasterLayers.filter((l) => l.temporal).map((l) => l.id))
+    const next = new Set()
+    for (const id of visibleLayers) if (!temporalIds.has(id)) next.add(id)
+    return next
+  }, [radar, visibleLayers, rasterLayers])
 
   // The computed rasters (per pixel CAR Index, hotspot mask) are graded on demand,
   // so a visible one is prepared through the compute endpoint before the map draws
@@ -733,6 +782,20 @@ export default function App () {
           </div>
         )}
 
+        {/* Radar imagery is real time and best effort: a rolled-off frame is
+            served transparent, but if the whole feed is unreachable, say so
+            briefly rather than leaving a silently stale loop. */}
+        {radar && radarError && (
+          <div className="pointer-events-none absolute left-1/2 top-4 z-20 flex -translate-x-1/2">
+            <AutoDismiss key={radarError}>
+              <div className="flex max-w-[26rem] items-start gap-2 rounded-cb border border-danger-border bg-danger-soft px-3.5 py-2 shadow-cb-lg">
+                <TbAlertTriangle className="mt-[1px] shrink-0 text-[15px] text-danger" aria-hidden />
+                <span className="text-[12px] text-danger"><span className="font-semibold">Radar</span> {radarError}</span>
+              </div>
+            </AutoDismiss>
+          </div>
+        )}
+
 
         {/* Forecast trend chart for a selected boundary, floated over the lower
             map above the timeline. Map view only, and only once a model has
@@ -824,10 +887,18 @@ export default function App () {
             </div>
           </div>
 
-          {/* The bottom rail is the forecast timeline. It shows the time slider
-              once a cycle is ingested, and says so plainly until then. */}
+          {/* The bottom rail is the timeline. The Radar tab scrubs the live radar
+              loop; every other tab scrubs the forecast leads once a cycle is in. */}
           <div className="flex shrink-0 items-end justify-center gap-3 pt-3">
-            {forecast.status === 'ok' && leads.length ? (
+            {radar ? (
+              <RadarTimeSlider
+                times={radarTimes}
+                index={Math.min(radarIndex, Math.max(0, radarTimes.length - 1))}
+                onIndex={setRadarIndex}
+                products={radarProductLabels}
+                intervalMin={radarTimeline.intervalMin}
+              />
+            ) : forecast.status === 'ok' && leads.length ? (
               <TimeSlider
                 cycle={forecast.creationTime}
                 model={activeModel?.modelLabel ?? forecast.model}

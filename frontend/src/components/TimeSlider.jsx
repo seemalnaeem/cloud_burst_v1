@@ -20,7 +20,6 @@ import {
 
 import { IconButton } from './ui/Panel'
 
-const PKT = 'Asia/Karachi'
 const SPEEDS = [0.5, 1, 2, 3]
 const BASE_INTERVAL_MS = 1000
 
@@ -213,8 +212,10 @@ export default function TimeSlider ({
 
         {/* Readout group, a bordered strip of cells with the lead picked out. */}
         <div className="flex shrink-0 items-stretch divide-x divide-border overflow-hidden rounded-cb-sm border border-border">
-          <Readout label="Valid PKT" value={fmt(validDate, PKT)} />
-          <Readout label="UTC" value={fmt(validDate, 'UTC')} />
+          {/* One valid time, in UTC, the way the source cycles are stamped. A PKT
+              restamp added a second clock that read hours ahead and only muddied
+              which instant the step meant. */}
+          <Readout label="Valid UTC" value={fmt(validDate, 'UTC')} minW="min-w-[7.5rem]" />
           <Readout label="Lead" value={leadText(lead)} emphasis minW="min-w-[5rem]" />
         </div>
       </div>

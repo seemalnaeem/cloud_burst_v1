@@ -6,14 +6,13 @@
 // axis is wall-clock time, not a forecast lead, and it owns its own play loop so
 // the two timelines never fight. Shown only in the Radar tab.
 
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import {
   TbPlayerPlayFilled, TbPlayerPauseFilled, TbPlayerSkipBackFilled, TbChevronLeft, TbChevronRight
 } from 'react-icons/tb'
 
 import { IconButton } from './ui/Panel'
 
-const PKT = 'Asia/Karachi'
 const SPEEDS = [0.5, 1, 2, 3]
 // Radar loops read best a touch quicker than the forecast slider's one second.
 const BASE_INTERVAL_MS = 600
@@ -29,6 +28,14 @@ const fmt = (date, timeZone) =>
   new Intl.DateTimeFormat('en-GB', {
     timeZone, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false
   }).format(date)
+
+// A gap's length in the shortest honest words: whole hours once it is at least an
+// hour and a half, otherwise the odd hour-and-fraction or the sub-hour minutes.
+const gapLabel = (minutes) => {
+  if (minutes < 90) return minutes >= 60 ? '1 h gap' : `${Math.round(minutes)} m gap`
+  const hours = minutes / 60
+  return `${hours >= 10 ? Math.round(hours) : Math.round(hours * 10) / 10} h gap`
+}
 
 // The finest cadence we will ever grid at, so one stray short gap cannot shatter
 // the axis into two-minute steps.
@@ -143,6 +150,20 @@ export default function RadarTimeSlider ({ times, index, onIndex, products = [],
     elapsed: i <= at
   }))
 
+  // Steps sit an equal distance apart on the bar even when the timeline collapses
+  // a dead stretch, so a jump of many hours between two neighbours is invisible
+  // without a marker. Flag a step whose jump dwarfs the normal cadence (well over
+  // an hour, and far larger than the grid interval so an hourly product's own
+  // steps are not flagged) and label it with the gap it hides.
+  const gapThresholdMin = Math.max(60, intervalMin * 4)
+  const gaps = count > 1
+    ? ticks
+        .slice(1)
+        .map((t) => ({ ...t, minutes: (times[t.i] - times[t.i - 1]) / 60000 }))
+        .filter((t) => t.minutes >= gapThresholdMin)
+    : []
+  const gapIdx = new Set(gaps.map((g) => g.i))
+
   const cycleSpeed = () => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])
 
   const seek = (clientX) => {
@@ -208,7 +229,7 @@ export default function RadarTimeSlider ({ times, index, onIndex, products = [],
           aria-valuemin={0}
           aria-valuemax={count - 1}
           aria-valuenow={at}
-          aria-valuetext={current ? fmt(current, PKT) : ''}
+          aria-valuetext={current ? `${fmt(current, 'UTC')} UTC` : ''}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
@@ -229,6 +250,24 @@ export default function RadarTimeSlider ({ times, index, onIndex, products = [],
               }}
             />
           ))}
+          {/* Where the timeline collapsed a long dead stretch: a bold amber tick
+              at the jump, with a small always-on label naming the hidden gap.
+              The label floats clear above the bar so it never covers a tick,
+              the thumb or the readout, and is clamped inside the track's ends. */}
+          {gaps.map((g) => (
+            <Fragment key={`gap-${g.i}`}>
+              <span
+                className="pointer-events-none absolute top-1/2 w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber"
+                style={{ left: `${g.pct}%`, height: '16px' }}
+              />
+              <span
+                className="pointer-events-none absolute -translate-x-1/2 whitespace-nowrap rounded-full border border-amber-border bg-amber-soft px-1.5 py-px text-[8.5px] font-semibold leading-none text-amber"
+                style={{ left: `${Math.min(94, Math.max(6, g.pct))}%`, bottom: 'calc(50% + 11px)' }}
+              >
+                {gapLabel(g.minutes)}
+              </span>
+            </Fragment>
+          ))}
           <div
             className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-primary bg-panel"
             style={{ left: `${pct}%`, boxShadow: '0 1px 3px rgba(16,24,40,0.35)' }}
@@ -236,8 +275,10 @@ export default function RadarTimeSlider ({ times, index, onIndex, products = [],
         </div>
 
         <div className="flex shrink-0 items-stretch divide-x divide-border overflow-hidden rounded-cb-sm border border-border">
-          <Readout label="Valid PKT" value={current ? fmt(current, PKT) : '--'} minW="min-w-[7rem]" />
-          <Readout label="UTC" value={current ? fmt(current, 'UTC') : '--'} minW="min-w-[7rem]" />
+          {/* The source stamps every scan in UTC, so that is the one time shown:
+              a PKT restamp of a past scan reads like a future clock time and only
+              confuses a hindcast loop. */}
+          <Readout label="Scan UTC" value={current ? fmt(current, 'UTC') : '--'} minW="min-w-[7.5rem]" />
           <Readout label="Frame" value={`${at + 1}/${count}`} emphasis minW="min-w-[3.5rem]" />
         </div>
       </div>

@@ -6,6 +6,8 @@ compose service name, never an address.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 import asyncpg
@@ -15,18 +17,42 @@ from app.shared.logging import logger
 
 _pool: asyncpg.Pool | None = None
 
+# How long to keep trying the database at startup, and the gap between tries. A
+# machine reboot restarts every container at once, and Docker's restart policy
+# does not honour depends_on ordering, so the api can come up while Postgres is
+# still initialising. Rather than fail startup and sit dead until a manual
+# restart, wait out that window; a database that is genuinely down still fails
+# loudly once the window elapses.
+_CONNECT_TIMEOUT_S = 90
+_CONNECT_RETRY_S = 2
+
 
 async def connect() -> None:
     global _pool
     if _pool is not None:
         return
-    _pool = await asyncpg.create_pool(
-        dsn=settings.asyncpg_dsn,
-        min_size=settings.pg_pool_min,
-        max_size=settings.pg_pool_max,
-        command_timeout=180,
-    )
-    logger.info("db_pool_ready", min=settings.pg_pool_min, max=settings.pg_pool_max)
+    deadline = time.monotonic() + _CONNECT_TIMEOUT_S
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            _pool = await asyncpg.create_pool(
+                dsn=settings.asyncpg_dsn,
+                min_size=settings.pg_pool_min,
+                max_size=settings.pg_pool_max,
+                command_timeout=180,
+            )
+            break
+        except (asyncpg.CannotConnectNowError, OSError) as exc:
+            # CannotConnectNowError is "the database system is starting up";
+            # OSError covers connection refused and the service name not yet
+            # resolving. Both are transient during a co-ordinated restart.
+            if time.monotonic() >= deadline:
+                logger.error("db_pool_unreachable", attempts=attempt, error=str(exc))
+                raise
+            logger.warning("db_pool_waiting", attempt=attempt, error=str(exc))
+            await asyncio.sleep(_CONNECT_RETRY_S)
+    logger.info("db_pool_ready", min=settings.pg_pool_min, max=settings.pg_pool_max, attempts=attempt)
 
 
 async def disconnect() -> None:

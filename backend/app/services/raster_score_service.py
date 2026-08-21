@@ -48,7 +48,7 @@ _SEM = asyncio.Semaphore(4)
 # dozen browsers toggling a layer at once trigger a single pass.
 _tasks: dict[tuple, asyncio.Task] = {}
 
-_LAYER_BAND = {"cari_raster": "cari_raster", "hotspots": "hotspots"}
+_LAYER_BAND = {"cari_raster": "cari_raster", "hotspots": "hotspots", "ensemble_precip": "ensemble_precip_mean"}
 
 
 def _resampling_for(band_key: str) -> str:
@@ -247,7 +247,69 @@ async def _generate_hotspots(creation_time, lead: int) -> None:
     logger.info("hotspots_generated", lead=lead, hits=int(out.sum()), path=str(dst))
 
 
-_GENERATORS = {"cari_raster": _generate_cari, "hotspots": _generate_hotspots}
+# The precipitation ensemble averages every model that carries a precipitation
+# rate. GFS has none, so it is not here; the mean is unweighted, order cosmetic.
+_ENSEMBLE_PRECIP_MODELS = ["WRFPRS", "GRAPES", "ICON", "D1D", "GDFS"]
+
+
+async def _generate_ensemble_precip(creation_time, lead: int) -> None:
+    """Average the models' precipitation rate on the WRFPRS grid and catalogue it.
+
+    Each model's per-hour precipitation (pmd_hourtpe, already a mm/hr rate) is
+    warped onto the WRFPRS grid so the cells coincide exactly, then the plain
+    per-pixel mean is taken over whichever models cover a cell. Each model is read
+    at this lead on its own latest cycle, the same way the CAR Index resolves its
+    multi model inputs; the product is catalogued against the WRFPRS cycle like the
+    other computed rasters.
+    """
+    grid = await _grid_for(creation_time, lead)
+    tmp = settings.tmp_dir / f"ensemble_precip_{lead:03d}"
+
+    arrays: list[np.ndarray] = []
+    used: list[str] = []
+    for model in _ENSEMBLE_PRECIP_MODELS:
+        cycle = await repositories.latest_cycle(model)
+        model_ct = cycle["creation_time"] if cycle else None
+        if model_ct is None:
+            continue
+        path = await repositories.raster_path("pmd_hourtpe", model, model_ct, lead)
+        if not path:
+            continue
+        async with _SEM:
+            arr = await asyncio.to_thread(
+                align.load_aligned, path, grid, tmp, resampling="bilinear", tag=f"pmd_hourtpe_{model}"
+            )
+        arrays.append(arr)
+        used.append(model)
+
+    if not arrays:
+        raise NotConfigured(
+            "wx.raster_catalog",
+            f"the precipitation ensemble, no model has pmd_hourtpe catalogued at lead {lead}",
+        )
+
+    # Mean over the models that cover each cell. nansum sidesteps the all-NaN-slice
+    # warning nanmean would raise, and a cell no model covers (count 0) is off the
+    # domain, written as nodata rather than a false zero.
+    stack = np.stack(arrays, axis=0)
+    count = (~np.isnan(stack)).sum(axis=0)
+    summed = np.nansum(stack, axis=0)
+    mean = np.where(count > 0, summed / np.maximum(count, 1), np.float32(-9999.0)).astype("float32")
+
+    dst = settings.cog_dir / _cog_name("ensemble_precip_mean", creation_time, lead)
+    await asyncio.to_thread(_write_cog, mean, grid, dst, dtype="float32", nodata=-9999.0)
+    await repositories.catalog_computed_raster(
+        "ensemble_precip_mean", GRID_MODEL, creation_time, lead, str(dst),
+        unit="mm/hr", min_value=0, max_value=15, nodata=-9999.0,
+    )
+    logger.info("ensemble_precip_generated", lead=lead, models=used, path=str(dst))
+
+
+_GENERATORS = {
+    "cari_raster": _generate_cari,
+    "hotspots": _generate_hotspots,
+    "ensemble_precip": _generate_ensemble_precip,
+}
 
 
 async def _resolve_cycle(forecast_hours: int) -> tuple[object, int]:

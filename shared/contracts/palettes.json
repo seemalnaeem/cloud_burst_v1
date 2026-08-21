@@ -12,6 +12,11 @@
     "$transparentFirstNote": "The lowest bucket renders transparent, so a dry or negligibly wet cell shows the map beneath instead of a wash of pale blue. Applied by the tile colormap and mirrored in the legend so the two agree.",
     "colors": ["#c6dbef", "#6baed6", "#2171b5", "#00ff00", "#ffff00", "#ff7f00", "#ff0000", "#7a0177"]
   },
+  "ensemblePrecip": {
+    "kind": "continuous",
+    "$comment": "Multi model precipitation ensemble. White at the low end (least forecast precipitation) deepening to blue, so the averaged rate reads as depth of blue. Not transparent-first: white is a value here, the driest cells, not the absence of data. Off-domain cells are nodata and stay transparent regardless.",
+    "colors": ["#ffffff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#08519c"]
+  },
   "elevation": {
     "kind": "continuous",
     "colors": ["#000080", "#0000ff", "#00ffff", "#00ff00", "#ffff00", "#ff7f00", "#ff0000", "#8b4513"]

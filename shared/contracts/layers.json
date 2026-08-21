@@ -219,6 +219,29 @@
       }
     },
     {
+      "id": "ensemble_precip",
+      "label": "Ensemble Precipitation",
+      "source": "computed",
+      "band": "ensemble_precip_mean",
+      "model": "WRFPRS",
+      "modelId": "ensemble",
+      "modelLabel": "Multi Model Ensemble",
+      "modelFull": "Multi Model Ensemble (per-pixel mean)",
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "ensemblePrecip",
+      "min": 0,
+      "max": 15,
+      "color": "#2171b5",
+      "opacity": 0.85,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Per-pixel mean precipitation rate across all models, resampled onto the WRFPRS grid. White is least, deepening to blue."
+      }
+    },
+    {
       "id": "dem",
       "label": "Elevation",
       "source": "cog",

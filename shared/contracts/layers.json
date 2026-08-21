@@ -471,7 +471,7 @@
     },
     {
       "id": "grapes_hourtpe",
-      "label": "Hourly Precipitation",
+      "label": "Precipitation Rate",
       "source": "pmd",
       "model": "GRAPES",
       "modelId": "grapes",
@@ -490,7 +490,7 @@
       "legend": {
         "geometry": "raster",
         "render": "steps",
-        "description": "Precipitation over the single step, surface, from CMA-GFS"
+        "description": "Mean precipitation rate (mm/hr), surface, fromCMA-GFS"
       }
     },
     {
@@ -615,7 +615,7 @@
     },
     {
       "id": "wrfprs_hourtpe",
-      "label": "Hourly Precipitation",
+      "label": "Precipitation Rate",
       "source": "pmd",
       "model": "WRFPRS",
       "modelId": "wrfprs",
@@ -634,7 +634,7 @@
       "legend": {
         "geometry": "raster",
         "render": "steps",
-        "description": "Precipitation over the single step, surface, from PMD-WRF"
+        "description": "Mean precipitation rate (mm/hr), surface, fromPMD-WRF"
       }
     },
     {
@@ -807,7 +807,7 @@
     },
     {
       "id": "icon_hourtpe",
-      "label": "Hourly Precipitation",
+      "label": "Precipitation Rate",
       "source": "pmd",
       "model": "ICON",
       "modelId": "icon",
@@ -826,7 +826,7 @@
       "legend": {
         "geometry": "raster",
         "render": "steps",
-        "description": "Precipitation over the single step, surface, from PMD-ICON"
+        "description": "Mean precipitation rate (mm/hr), surface, fromPMD-ICON"
       }
     },
     {
@@ -927,7 +927,7 @@
     },
     {
       "id": "ecmwf_hourtpe",
-      "label": "Hourly Precipitation",
+      "label": "Precipitation Rate",
       "source": "pmd",
       "model": "D1D",
       "modelId": "ecmwf",
@@ -946,7 +946,79 @@
       "legend": {
         "geometry": "raster",
         "render": "steps",
-        "description": "Precipitation over the single step, surface, from ECMWF-IFS"
+        "description": "Mean precipitation rate (mm/hr), surface, fromECMWF-IFS"
+      }
+    },
+    {
+      "id": "gowfs_hourtpe",
+      "label": "Precipitation Rate",
+      "source": "pmd",
+      "model": "GDFS",
+      "modelId": "gowfs",
+      "modelLabel": "CMA-GOWFS",
+      "modelFull": "CMA GOWFS Global (GDFS)",
+      "element": "HOURTPE",
+      "level": 0,
+      "levelLabel": "Surface",
+      "band": "pmd_hourtpe",
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "rainfall",
+      "color": "#1d4ed8",
+      "opacity": 0.72,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Mean precipitation rate (mm/hr), surface, fromCMA-GOWFS"
+      }
+    },
+    {
+      "id": "gowfs_tem",
+      "label": "Temperature",
+      "source": "pmd",
+      "model": "GDFS",
+      "modelId": "gowfs",
+      "modelLabel": "CMA-GOWFS",
+      "modelFull": "CMA GOWFS Global (GDFS)",
+      "element": "TEM",
+      "level": 0,
+      "levelLabel": "Surface",
+      "band": "pmd_tem",
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "plasma",
+      "color": "#dc2626",
+      "opacity": 0.72,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Air temperature, surface, from CMA-GOWFS"
+      }
+    },
+    {
+      "id": "gowfs_rhu",
+      "label": "Relative Humidity",
+      "source": "pmd",
+      "model": "GDFS",
+      "modelId": "gowfs",
+      "modelLabel": "CMA-GOWFS",
+      "modelFull": "CMA GOWFS Global (GDFS)",
+      "element": "RHU",
+      "level": 0,
+      "levelLabel": "Surface",
+      "band": "pmd_rhu",
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "continuous",
+      "color": "#0891b2",
+      "opacity": 0.72,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Relative humidity, surface, from CMA-GOWFS"
       }
     },
     {

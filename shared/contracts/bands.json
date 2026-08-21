@@ -273,13 +273,14 @@
       "$pmdLevelComment": "Second wave of PMD bands, added once the model endpoint was found to serve pressure levels. HOURTPE is precipitation over the single step, not cumulative, so it needs no differencing. The _pl700, _pl500 and _pl850 bands are the pressure level fields the CARI model actually wants: PMD serves RH at 700 and 500 and temperature at 850 through the level parameter, which the surface-only feed did not. Vertical velocity and wind at level are still absent, so CARI is closer but not complete.",
       "key": "pmd_hourtpe",
       "sourceScale": 0.1,
-      "label": "Hourly Precipitation",
-      "unit": "mm",
+      "label": "Precipitation Rate",
+      "unit": "mm/hr",
       "category": "rainfall",
       "temporal": true,
-      "min": 0, "max": 25,
+      "min": 0, "max": 15,
       "palette": "rainfall",
-      "legendTitle": "Hourly Precipitation (mm)"
+      "legendTitle": "Precipitation Rate (mm/hr)",
+      "$rateComment": "PMD HOURTPE is precipitation over one forecast step, and the step is 1 h for WRFPRS but 3 h (occasionally 9 h) for the global models, so the raw per-step totals are not comparable between models. The ingest divides each step by its own length in hours, so the stored value is a mm/hr rate: honest per model and directly averageable for the multi model ensemble. sourceScale 0.1 still applies first to the Int16 feeds, before the division."
     },
     {
       "key": "pmd_rhu_700",

@@ -199,6 +199,31 @@ def lead_from_cycle(cycle: datetime, forecast_time: str) -> int:
     return int((b - cycle).total_seconds() // 3600)
 
 
+def step_hours_for(records: list[dict]) -> list[int | None]:
+    """Hours each per-step field covers, aligned to records sorted by forecast_time.
+
+    A step's accumulation window is the gap back to the previous step; the first
+    record has no predecessor, so it borrows the next gap. Used to turn PMD's
+    per-step precipitation (HOURTPE) into a per-hour rate that is comparable across
+    models whose step differs: 1 h for WRFPRS, 3 h (occasionally 9 h) for the
+    global models.
+    """
+    times = []
+    for r in records:
+        b = datetime.fromisoformat(r["forecast_time"].replace("Z", "+00:00"))
+        if b.tzinfo is None:
+            b = b.replace(tzinfo=timezone.utc)
+        times.append(b)
+    out: list[int | None] = []
+    for i in range(len(records)):
+        if i == 0:
+            d = (times[1] - times[0]) if len(records) > 1 else None
+        else:
+            d = times[i] - times[i - 1]
+        out.append(int(d.total_seconds() // 3600) if d else None)
+    return out
+
+
 def parse_cycle(data_time: str) -> datetime:
     return datetime.fromisoformat(data_time.replace("Z", "+00:00")).astimezone(timezone.utc)
 
@@ -259,6 +284,12 @@ def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | Non
         if max_leads:
             records = records[:max_leads]
 
+        # Precipitation is stored as a per-hour rate, not the raw per-step total, so
+        # the models line up on one honest unit (mm/hr) and the ensemble can average
+        # them. Measure each step's length from its own forecast times here, before
+        # any step is dropped, so the division uses the true window.
+        step_hours = step_hours_for(records) if band_key == "pmd_hourtpe" else None
+
         # The cycle must exist before anything is catalogued against it, because
         # the catalogue has a foreign key onto wx.cycles. Register it from the
         # first field that returns data, then refine published_leads at the end.
@@ -269,7 +300,7 @@ def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | Non
 
         step = time.time()
         done = 0
-        for rec in records:
+        for i, rec in enumerate(records):
             lead = lead_from_cycle(cycle_dt, rec["forecast_time"])
             # Steps valid before the model cycle are history from a carried-over
             # field; they are not on the forecast timeline, so drop them.
@@ -312,6 +343,16 @@ def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | Non
                     scale_raster(raw, scaled, scale)
                     raw.unlink(missing_ok=True)
                     source = scaled
+                # Turn the per-step precipitation into a per-hour rate by dividing by
+                # its own step length. WRFPRS (1 h) passes through unchanged; the
+                # global models (3 h, or 9 h across a gap) come onto the same basis.
+                # Applied after the tenths scaling so the rate is physical mm/hr, and
+                # to the float source too, since ICON is Float32 but still a 3 h step.
+                if step_hours is not None and step_hours[i] and step_hours[i] != 1:
+                    rate = settings.tmp_dir / f"pmd_rate_{dt}_{band_key}_{lead}.tif"
+                    scale_raster(source, rate, 1.0 / step_hours[i])
+                    source.unlink(missing_ok=True)
+                    source = rate
                 # Clip the Asia-wide field to the national boundary, so the
                 # temporal layers share the terrain layers' clean edge and carry
                 # far fewer pixels than the raw continental tile.

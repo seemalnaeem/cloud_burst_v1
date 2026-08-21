@@ -830,7 +830,11 @@ export default function LayersPanel ({
   // Split the raster layers into their behavioural groups. A forecast layer is
   // any that names a model (PMD or GFS); those are grouped under the model
   // selector. The rest are terrain (static) or analysis (computed).
-  const forecastLayers = rasterLayers.filter((l) => l.modelId)
+  // A model's forecast fields sit under the model selector. A computed forecast
+  // layer (the multi model ensemble) carries a modelId too, but it is not a
+  // selectable model: it stands as its own section instead.
+  const forecastLayers = rasterLayers.filter((l) => l.modelId && l.source !== 'computed')
+  const forecastComputedLayers = rasterLayers.filter((l) => l.modelId && l.source === 'computed')
   const analysisLayers = rasterLayers.filter((l) => !l.modelId && (l.bandDriven || l.source === 'computed'))
   const terrainLayers = rasterLayers.filter(
     (l) => !l.modelId && !l.bandDriven && l.source !== 'computed'
@@ -907,7 +911,7 @@ export default function LayersPanel ({
   const TITLES = { map: 'Layers', forecast: 'Forecast', analysis: 'Analysis', radar: 'Radar' }
   const hasBody =
     (view === 'map' && (layers.length > 0 || terrainLayers.length > 0)) ||
-    (view === 'forecast' && models.length > 0) ||
+    (view === 'forecast' && (models.length > 0 || forecastComputedLayers.length > 0)) ||
     (view === 'analysis' && (cariLayers.length > 0 || analysisLayers.length > 0))
 
   return (
@@ -1089,6 +1093,17 @@ export default function LayersPanel ({
                   />
                 )
               })}
+            </Section>
+          )}
+
+          {/* The multi model ensemble is its own section under the model selector,
+              not a model inside it. Open by default, like the Hotspot Mask. Its
+              accumulation windows are mutually exclusive, so the rows read as a
+              choice; the active one's legend is opened so the derivation shows. */}
+          {view === 'forecast' && forecastComputedLayers.length > 0 && (
+            <Section label={forecastComputedLayers[0].modelLabel || 'Multi Model Ensemble'}>
+              {forecastComputedLayers.map((l) =>
+                genericRow(l, true, Boolean(l.temporal), undefined, visibleLayers.has(l.id)))}
             </Section>
           )}
         </ul>

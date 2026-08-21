@@ -219,14 +219,15 @@
       }
     },
     {
-      "id": "ensemble_precip",
-      "label": "Ensemble Precipitation",
+      "id": "ensemble_precip_1h",
+      "label": "Precipitation 1 Hour",
       "source": "computed",
-      "band": "ensemble_precip_mean",
+      "band": "ensemble_precip_1h",
       "model": "WRFPRS",
       "modelId": "ensemble",
       "modelLabel": "Multi Model Ensemble",
-      "modelFull": "Multi Model Ensemble (per-pixel mean)",
+      "modelFull": "Multi Model Ensemble (1-hour total)",
+      "windowHours": 1,
       "temporal": true,
       "requiresCycle": true,
       "palette": "ensemblePrecip",
@@ -238,7 +239,103 @@
       "legend": {
         "geometry": "raster",
         "render": "steps",
-        "description": "Per-pixel mean precipitation rate across all models, resampled onto the WRFPRS grid. White is least, deepening to blue."
+        "description": "Multi model mean precipitation total over 1 hour, on the WRFPRS grid. White is least, deepening to blue."
+      }
+    },
+    {
+      "id": "ensemble_precip_3h",
+      "label": "Precipitation 3 Hours",
+      "source": "computed",
+      "band": "ensemble_precip_3h",
+      "model": "WRFPRS",
+      "modelId": "ensemble",
+      "modelLabel": "Multi Model Ensemble",
+      "modelFull": "Multi Model Ensemble (3-hour total)",
+      "windowHours": 3,
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "ensemblePrecip",
+      "min": 0,
+      "max": 30,
+      "color": "#2171b5",
+      "opacity": 0.85,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Multi model mean precipitation total over 3 hours, on the WRFPRS grid. White is least, deepening to blue."
+      }
+    },
+    {
+      "id": "ensemble_precip_6h",
+      "label": "Precipitation 6 Hours",
+      "source": "computed",
+      "band": "ensemble_precip_6h",
+      "model": "WRFPRS",
+      "modelId": "ensemble",
+      "modelLabel": "Multi Model Ensemble",
+      "modelFull": "Multi Model Ensemble (6-hour total)",
+      "windowHours": 6,
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "ensemblePrecip",
+      "min": 0,
+      "max": 50,
+      "color": "#2171b5",
+      "opacity": 0.85,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Multi model mean precipitation total over 6 hours, on the WRFPRS grid. White is least, deepening to blue."
+      }
+    },
+    {
+      "id": "ensemble_precip_12h",
+      "label": "Precipitation 12 Hours",
+      "source": "computed",
+      "band": "ensemble_precip_12h",
+      "model": "WRFPRS",
+      "modelId": "ensemble",
+      "modelLabel": "Multi Model Ensemble",
+      "modelFull": "Multi Model Ensemble (12-hour total)",
+      "windowHours": 12,
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "ensemblePrecip",
+      "min": 0,
+      "max": 80,
+      "color": "#2171b5",
+      "opacity": 0.85,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Multi model mean precipitation total over 12 hours, on the WRFPRS grid. White is least, deepening to blue."
+      }
+    },
+    {
+      "id": "ensemble_precip_24h",
+      "label": "Precipitation 24 Hours",
+      "source": "computed",
+      "band": "ensemble_precip_24h",
+      "model": "WRFPRS",
+      "modelId": "ensemble",
+      "modelLabel": "Multi Model Ensemble",
+      "modelFull": "Multi Model Ensemble (24-hour total)",
+      "windowHours": 24,
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "ensemblePrecip",
+      "min": 0,
+      "max": 120,
+      "color": "#2171b5",
+      "opacity": 0.85,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Multi model mean precipitation total over 24 hours, on the WRFPRS grid. White is least, deepening to blue."
       }
     },
     {

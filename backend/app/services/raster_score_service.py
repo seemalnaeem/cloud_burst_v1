@@ -48,7 +48,24 @@ _SEM = asyncio.Semaphore(4)
 # dozen browsers toggling a layer at once trigger a single pass.
 _tasks: dict[tuple, asyncio.Task] = {}
 
-_LAYER_BAND = {"cari_raster": "cari_raster", "hotspots": "hotspots", "ensemble_precip": "ensemble_precip_mean"}
+# The precipitation ensemble is served as accumulations over five windows. Each
+# layer id is also its band key; the number is the window in hours.
+_ENSEMBLE_WINDOWS = {
+    "ensemble_precip_1h": 1,
+    "ensemble_precip_3h": 3,
+    "ensemble_precip_6h": 6,
+    "ensemble_precip_12h": 12,
+    "ensemble_precip_24h": 24,
+}
+# Display ceiling per window (mm), longer windows accumulate more. Mirrors the
+# max in bands.json so the legend and the tile rescale agree.
+_ENSEMBLE_ACCUM_MAX = {1: 15, 3: 30, 6: 50, 12: 80, 24: 120}
+
+_LAYER_BAND = {
+    "cari_raster": "cari_raster",
+    "hotspots": "hotspots",
+    **{layer_id: layer_id for layer_id in _ENSEMBLE_WINDOWS},
+}
 
 
 def _resampling_for(band_key: str) -> str:
@@ -252,63 +269,121 @@ async def _generate_hotspots(creation_time, lead: int) -> None:
 _ENSEMBLE_PRECIP_MODELS = ["WRFPRS", "GRAPES", "ICON", "D1D", "GDFS"]
 
 
-async def _generate_ensemble_precip(creation_time, lead: int) -> None:
-    """Average the models' precipitation rate on the WRFPRS grid and catalogue it.
+def _steps_by_lead(leads: list[int]) -> dict[int, int]:
+    """Step length in hours ending at each lead, from the sorted lead sequence.
 
-    Each model's per-hour precipitation (pmd_hourtpe, already a mm/hr rate) is
-    warped onto the WRFPRS grid so the cells coincide exactly, then the plain
-    per-pixel mean is taken over whichever models cover a cell. Each model is read
-    at this lead on its own latest cycle, the same way the CAR Index resolves its
-    multi model inputs; the product is catalogued against the WRFPRS cycle like the
-    other computed rasters.
+    The window a step accumulates over is the gap back to the previous lead; the
+    first lead borrows the next gap. Used to weight each step by the hours it
+    covers when a model's precipitation is accumulated over a window.
     """
-    grid = await _grid_for(creation_time, lead)
-    tmp = settings.tmp_dir / f"ensemble_precip_{lead:03d}"
+    s = sorted(leads)
+    out: dict[int, int] = {}
+    for i, lead in enumerate(s):
+        if i == 0:
+            out[lead] = (s[1] - s[0]) if len(s) > 1 else 1
+        else:
+            out[lead] = s[i] - s[i - 1]
+    return out
 
-    arrays: list[np.ndarray] = []
-    used: list[str] = []
-    for model in _ENSEMBLE_PRECIP_MODELS:
-        cycle = await repositories.latest_cycle(model)
-        model_ct = cycle["creation_time"] if cycle else None
-        if model_ct is None:
-            continue
-        path = await repositories.raster_path("pmd_hourtpe", model, model_ct, lead)
+
+async def _model_accumulation(model: str, window: int, lead: int, grid: align.Grid, tmp: Path) -> np.ndarray | None:
+    """One model's precipitation total (mm) over the window ending at lead.
+
+    Each of the model's steps covers (lead-step, lead]; its overlap with the
+    window (lead-window, lead] is measured in hours, and the step's rate (mm/hr) is
+    multiplied by that overlap and summed. This weights every model by real time,
+    so a 3 h step counted against a 1 h window contributes only its one overlapping
+    hour, and WRFPRS's hourly steps and the coarse models' 3 h steps accumulate to
+    comparable totals. Returns None if the model covers none of the window.
+    """
+    cycle = await repositories.latest_cycle(model)
+    model_ct = cycle["creation_time"] if cycle else None
+    if model_ct is None:
+        return None
+    leads = await repositories.catalogued_leads("pmd_hourtpe", model, model_ct)
+    if not leads:
+        return None
+    steps = _steps_by_lead(leads)
+
+    win_start, win_end = lead - window, lead
+    overlaps: list[tuple[int, int]] = []
+    for ll in leads:
+        step = steps.get(ll) or 1
+        ov = min(ll, win_end) - max(ll - step, win_start)
+        if ov > 0:
+            overlaps.append((ll, ov))
+    if not overlaps:
+        return None
+
+    contribs: list[np.ndarray] = []
+    for ll, ov in overlaps:
+        path = await repositories.raster_path("pmd_hourtpe", model, model_ct, ll)
         if not path:
             continue
         async with _SEM:
             arr = await asyncio.to_thread(
-                align.load_aligned, path, grid, tmp, resampling="bilinear", tag=f"pmd_hourtpe_{model}"
+                align.load_aligned, path, grid, tmp, resampling="bilinear", tag=f"acc_{model}_{ll}"
             )
-        arrays.append(arr)
-        used.append(model)
+        contribs.append(arr * float(ov))
+    if not contribs:
+        return None
 
-    if not arrays:
+    stack = np.stack(contribs, axis=0)
+    covered = (~np.isnan(stack)).any(axis=0)
+    return np.where(covered, np.nansum(stack, axis=0), np.nan)
+
+
+async def _generate_ensemble_accum(window: int, creation_time, lead: int) -> None:
+    """The multi model precipitation total over a window, on the WRFPRS grid.
+
+    Each model is accumulated over the window in its own right (rate times the
+    hours each step covers), then the models' totals are averaged per pixel over
+    whichever cover a cell. Catalogued against the WRFPRS cycle like the other
+    computed rasters. See _model_accumulation for the time weighting that keeps the
+    mixed 1 h and 3 h cadences comparable.
+    """
+    grid = await _grid_for(creation_time, lead)
+    tmp = settings.tmp_dir / f"ensemble_accum_{window}h_{lead:03d}"
+    band = f"ensemble_precip_{window}h"
+
+    totals: list[np.ndarray] = []
+    used: list[str] = []
+    for model in _ENSEMBLE_PRECIP_MODELS:
+        total = await _model_accumulation(model, window, lead, grid, tmp)
+        if total is not None:
+            totals.append(total)
+            used.append(model)
+
+    if not totals:
         raise NotConfigured(
             "wx.raster_catalog",
-            f"the precipitation ensemble, no model has pmd_hourtpe catalogued at lead {lead}",
+            f"the {window}h precipitation ensemble, no model has precipitation ending at lead {lead}",
         )
 
-    # Mean over the models that cover each cell. nansum sidesteps the all-NaN-slice
-    # warning nanmean would raise, and a cell no model covers (count 0) is off the
-    # domain, written as nodata rather than a false zero.
-    stack = np.stack(arrays, axis=0)
+    stack = np.stack(totals, axis=0)
     count = (~np.isnan(stack)).sum(axis=0)
     summed = np.nansum(stack, axis=0)
     mean = np.where(count > 0, summed / np.maximum(count, 1), np.float32(-9999.0)).astype("float32")
 
-    dst = settings.cog_dir / _cog_name("ensemble_precip_mean", creation_time, lead)
+    dst = settings.cog_dir / _cog_name(band, creation_time, lead)
     await asyncio.to_thread(_write_cog, mean, grid, dst, dtype="float32", nodata=-9999.0)
     await repositories.catalog_computed_raster(
-        "ensemble_precip_mean", GRID_MODEL, creation_time, lead, str(dst),
-        unit="mm/hr", min_value=0, max_value=15, nodata=-9999.0,
+        band, GRID_MODEL, creation_time, lead, str(dst),
+        unit="mm", min_value=0, max_value=_ENSEMBLE_ACCUM_MAX[window], nodata=-9999.0,
     )
-    logger.info("ensemble_precip_generated", lead=lead, models=used, path=str(dst))
+    logger.info("ensemble_accum_generated", window=window, lead=lead, models=used, path=str(dst))
+
+
+def _accum_generator(window: int):
+    async def gen(creation_time, lead: int) -> None:
+        await _generate_ensemble_accum(window, creation_time, lead)
+    return gen
 
 
 _GENERATORS = {
     "cari_raster": _generate_cari,
     "hotspots": _generate_hotspots,
-    "ensemble_precip": _generate_ensemble_precip,
+    **{layer_id: _accum_generator(w) for layer_id, w in _ENSEMBLE_WINDOWS.items()},
 }
 
 

@@ -364,17 +364,65 @@
       "$comment": "Binary mask, 1 where all 13 hotspot conditions hold on a cell, self-masked so only the true pixels render. Generated on demand on the WRFPRS grid and catalogued against its cycle. Requires precipitation_type_sfc, which is not yet ingested, so generation returns NOT_CONFIGURED naming it until that source lands."
     },
     {
-      "key": "ensemble_precip_mean",
-      "label": "Ensemble Precipitation",
-      "unit": "mm/hr",
+      "$ensembleComment": "The multi model precipitation ensemble, served as accumulation totals over five windows. Each is the per-pixel mean of the models' own window totals on the WRFPRS grid: every model is accumulated over the window by weighting each step's rate (mm/hr) by the hours it covers, so the mixed 1 h (WRFPRS) and 3 h (global models) cadences give comparable mm totals, then averaged over whichever models cover a cell. GFS carries no precipitation and is not included. Generated on demand and catalogued against the WRFPRS cycle, like cari_raster. The display ceiling grows with the window; white is least, deepening to blue.",
+      "key": "ensemble_precip_1h",
+      "label": "Precipitation 1 Hour",
+      "unit": "mm",
       "category": "rainfall",
       "temporal": true,
       "computed": true,
       "min": 0, "max": 15,
       "nodata": -9999,
       "palette": "ensemblePrecip",
-      "legendTitle": "Ensemble Precipitation Rate (mm/hr)",
-      "$comment": "The plain per-pixel mean of every model's precipitation rate (pmd_hourtpe, mm/hr) on the WRFPRS grid. Each source is warped onto the WRFPRS cells (bilinear, same origin and exact overlap) and averaged with equal weight; a cell averages whichever models cover it. GFS carries no precipitation and is not in the mean. Generated on demand and catalogued against the WRFPRS cycle, the same way as cari_raster."
+      "legendTitle": "1-Hour Precipitation (mm)"
+    },
+    {
+      "key": "ensemble_precip_3h",
+      "label": "Precipitation 3 Hours",
+      "unit": "mm",
+      "category": "rainfall",
+      "temporal": true,
+      "computed": true,
+      "min": 0, "max": 30,
+      "nodata": -9999,
+      "palette": "ensemblePrecip",
+      "legendTitle": "3-Hour Precipitation (mm)"
+    },
+    {
+      "key": "ensemble_precip_6h",
+      "label": "Precipitation 6 Hours",
+      "unit": "mm",
+      "category": "rainfall",
+      "temporal": true,
+      "computed": true,
+      "min": 0, "max": 50,
+      "nodata": -9999,
+      "palette": "ensemblePrecip",
+      "legendTitle": "6-Hour Precipitation (mm)"
+    },
+    {
+      "key": "ensemble_precip_12h",
+      "label": "Precipitation 12 Hours",
+      "unit": "mm",
+      "category": "rainfall",
+      "temporal": true,
+      "computed": true,
+      "min": 0, "max": 80,
+      "nodata": -9999,
+      "palette": "ensemblePrecip",
+      "legendTitle": "12-Hour Precipitation (mm)"
+    },
+    {
+      "key": "ensemble_precip_24h",
+      "label": "Precipitation 24 Hours",
+      "unit": "mm",
+      "category": "rainfall",
+      "temporal": true,
+      "computed": true,
+      "min": 0, "max": 120,
+      "nodata": -9999,
+      "palette": "ensemblePrecip",
+      "legendTitle": "24-Hour Precipitation (mm)"
     }
   ]
 }

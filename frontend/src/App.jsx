@@ -144,7 +144,10 @@ export default function App () {
     const out = []
     const seen = new Set()
     for (const l of rasterLayers) {
-      if (!l.modelId || seen.has(l.modelId)) continue
+      // Computed forecast layers (the multi model ensemble) carry a modelId so
+      // they render as their own section, but they are not selectable models, so
+      // they are kept out of the model selector.
+      if (!l.modelId || l.source === 'computed' || seen.has(l.modelId)) continue
       seen.add(l.modelId)
       out.push({ modelId: l.modelId, model: l.model, modelLabel: l.modelLabel })
     }
@@ -183,14 +186,33 @@ export default function App () {
   // leads); the Forecast view keeps the model's own leads, hourly where it has
   // them.
   const analysisLeads = useMemo(() => modelLeads.filter((h) => h % 3 === 0), [modelLeads])
-  const leads = view === 'analysis' ? analysisLeads : modelLeads
+  // A visible ensemble accumulation layer steps the slider by its own window: each
+  // slot is that window's total, ending at the slot's lead. The finest active
+  // window wins if more than one were somehow on.
+  const ensembleWindow = useMemo(() => {
+    const wins = rasterLayers
+      .filter((l) => l.modelId === 'ensemble' && l.windowHours && visibleLayers.has(l.id))
+      .map((l) => l.windowHours)
+    return wins.length ? Math.min(...wins) : null
+  }, [rasterLayers, visibleLayers])
+  const ensembleLeads = useMemo(() => {
+    if (!ensembleWindow || !modelLeads.length) return null
+    const maxLead = modelLeads[modelLeads.length - 1]
+    const out = []
+    for (let h = ensembleWindow; h <= maxLead; h += ensembleWindow) out.push(h)
+    return out.length ? out : null
+  }, [ensembleWindow, modelLeads])
+  const leads = view === 'forecast' && ensembleLeads
+    ? ensembleLeads
+    : (view === 'analysis' ? analysisLeads : modelLeads)
   const activeLead = leads.length ? leads[Math.min(leadIndex, leads.length - 1)] : null
 
   // Temporal layers currently shown for the active model, for the slider to name
   // what the time applies to. The level is spelled out when it is not surface.
   const activeTemporalLabels = useMemo(
     () => rasterLayers
-      .filter((l) => l.temporal && l.modelId === activeModelId && visibleLayers.has(l.id))
+      .filter((l) => l.temporal && visibleLayers.has(l.id) &&
+        (l.modelId === activeModelId || (l.source === 'computed' && Boolean(l.modelId))))
       .map((l) => (l.level ? `${l.label} ${l.levelLabel}` : l.label)),
     [rasterLayers, visibleLayers, activeModelId]
   )
@@ -634,11 +656,19 @@ export default function App () {
   const toggleLayer = useCallback((id) => {
     setVisibleLayers((current) => {
       const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(id)) { next.delete(id); return next }
+      const def = rasterLayers.find((l) => l.id === id)
+      // The ensemble accumulation windows are mutually exclusive: the slider steps
+      // by one window at a time, so turning one on turns the others off.
+      if (def?.modelId === 'ensemble' && def.windowHours) {
+        for (const l of rasterLayers) {
+          if (l.modelId === 'ensemble' && l.windowHours) next.delete(l.id)
+        }
+      }
+      next.add(id)
       return next
     })
-  }, [])
+  }, [rasterLayers])
 
   // Show all means show everything that can draw. Switching on a layer whose
   // data is not ingested would produce a row of failed tile requests and an

@@ -1,5 +1,11 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "PGDATABASE": "cari",
+    "PGUSER": "cbd_user",
+    "PGPORT": "5545",
+    "PGHOST": "localhost"
+  },
   "permissions": {
     "allow": [
       "Bash(docker compose:*)",
@@ -24,7 +30,32 @@
       "Bash(curl -s http://localhost:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T cbd-db psql -U cbd_user -d cari -tA -c \"SELECT model, creation_time, complete FROM wx.cycles WHERE complete=true ORDER BY model;\")",
+      "Bash(grep -nA8 \"def parse_cycle\\\\|def lead_from_cycle\" scripts/ingest/ingest_pmd.py)",
+      "Bash(curl -s \"http://localhost:3090/api/raster/resolve?layer=forecast&band=pmd_cape&model=GRAPES&lead=0\")",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('creationTime:',d.get\\('creationTime'\\),'stale:',d.get\\('stale'\\),'path set:',bool\\(d.get\\('path'\\)\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(curl -s \"http://localhost:3090/api/raster/resolve?layer=grapes_cape&lead=0\")",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('creationTime:',d.get\\('creationTime'\\),'| stale:',d.get\\('stale'\\),'| path set:',bool\\(d.get\\('path'\\)\\)\\)\")",
+      "Bash(curl -s \"http://localhost:3090/api/raster/resolve?layer=icon_dpt&lead=0\")",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\(d.get\\('error',{}\\).get\\('code'\\) or \\('creationTime='+str\\(d.get\\('creationTime'\\)\\)+' stale='+str\\(d.get\\('stale'\\)\\)\\)\\)\")",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('products:',len\\(d.get\\('products',[]\\)\\),'| stale:',d.get\\('stale'\\),'| asOf:',d.get\\('asOf'\\)\\)\")",
+      "Bash(curl -s \"http://localhost:3090/api/upstream/advisories\")",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('release:',bool\\(d.get\\('release'\\)\\),'| stale:',d.get\\('stale'\\)\\)\")",
+      "Bash(curl -s \"http://localhost:3090/api/upstream/status\")",
+      "Bash(curl -s \"http://localhost:3090/api/forecast/meta?model=GRAPES\")",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('status:',d.get\\('status'\\),'| creationTime:',d.get\\('creationTime'\\),'| stale:',d.get\\('stale'\\),'| ageHours:',d.get\\('ageHours'\\)\\)\")",
+      "Bash(curl -s \"http://localhost:3090/api/meta/forecast?model=GRAPES\")",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('status:',d.get\\('status'\\),'stale:',d.get\\('stale'\\),'ageHours:',d.get\\('ageHours'\\)\\)\")",
+      "Bash(npm -v)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:4090/)",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('stale:',d.get\\('stale'\\),'| ageHours \\(since fetch\\):',d.get\\('ageHours'\\)\\)\")",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T cbd-db psql -U cbd_user -d cari -tA -c \"SELECT model, creation_time, discovered_at, complete, now\\(\\) - discovered_at AS since_fetch FROM wx.cycles WHERE model='GRAPES' AND complete ORDER BY creation_time DESC;\")",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('stale:',d.get\\('stale'\\),'ageHours:',d.get\\('ageHours'\\)\\)\")",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('stale:',d.get\\('stale'\\),'path:',bool\\(d.get\\('path'\\)\\)\\)\")",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('release:',bool\\(d.get\\('release'\\)\\),'stale:',d.get\\('stale'\\)\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:4090/)"
     ],
     "deny": [
       "Read(./.env)",
@@ -34,11 +65,5 @@
       "Bash(dropdb:*)",
       "Bash(rm -rf /:*)"
     ]
-  },
-  "env": {
-    "PGDATABASE": "cari",
-    "PGUSER": "cbd_user",
-    "PGPORT": "5545",
-    "PGHOST": "localhost"
   }
 }

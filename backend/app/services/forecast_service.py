@@ -55,6 +55,7 @@ async def forecast_timeseries(layer_id: str, kind: str, key: str, reducer: str =
     if cycle is None:
         raise NotConfigured("wx.cycles", f"a forecast cycle for model {model}")
     creation_time = cycle["creation_time"]
+    stale = bool(cycle.get("stale"))
     leads = sorted(cycle["published_leads"] or [])
 
     async def one(lead: int) -> dict:
@@ -81,5 +82,6 @@ async def forecast_timeseries(layer_id: str, kind: str, key: str, reducer: str =
         "reducer": reducer,
         "region": {"kind": kind, "key": key, "name": region["name"]},
         "creationTime": creation_time.isoformat(),
+        "stale": stale,
         "points": list(points),
     }

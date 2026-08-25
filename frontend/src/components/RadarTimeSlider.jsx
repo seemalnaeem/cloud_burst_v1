@@ -11,6 +11,7 @@ import {
   TbPlayerPlayFilled, TbPlayerPauseFilled, TbPlayerSkipBackFilled, TbChevronLeft, TbChevronRight
 } from 'react-icons/tb'
 
+import StaleNotice from './StaleNotice'
 import { IconButton } from './ui/Panel'
 
 const SPEEDS = [0.5, 1, 2, 3]
@@ -116,7 +117,7 @@ function Readout ({ label, value, emphasis = false, minW = '' }) {
   )
 }
 
-export default function RadarTimeSlider ({ times, index, onIndex, products = [], intervalMin = 10 }) {
+export default function RadarTimeSlider ({ times, index, onIndex, products = [], intervalMin = 10, stale = false, asOf = null }) {
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(1)
   const trackRef = useRef(null)
@@ -282,6 +283,15 @@ export default function RadarTimeSlider ({ times, index, onIndex, products = [],
           <Readout label="Frame" value={`${at + 1}/${count}`} emphasis minW="min-w-[3.5rem]" />
         </div>
       </div>
+
+      {/* Stale means the live directory listing was unreachable and the gateway
+          served the last-known-good series instead; the loop above still plays,
+          so this is a calmer notice, not the radarError toast over the map. */}
+      {stale && (
+        <div className="mt-2">
+          <StaleNotice label="radar" asOf={asOf} />
+        </div>
+      )}
 
       <div className="mt-2 flex items-center justify-between border-t border-border pt-1.5 text-[10.5px] text-muted">
         <span>

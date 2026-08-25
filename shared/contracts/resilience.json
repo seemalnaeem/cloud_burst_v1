@@ -1,0 +1,19 @@
+{
+  "$description": "Graceful-degradation policy shared by every tier. When a live source (PMD forecast, radar, press releases) is unreachable, the portal serves the most recent good data it already holds rather than a blank map, and labels how old it is. These numbers are the single source of truth for how long stale data may stand in for fresh data.",
+
+  "maxStaleHours": 72,
+  "$maxStaleHours": "Hard ceiling on fallback age. Data older than this is not served as a stand-in; the surface shows its not-available state instead of misleadingly old weather. Drives forecast cycle retention, forecast cycle selection, radar last-known-good, and the advisory last-known-good.",
+
+  "staleNoticeHours": 26,
+  "$staleNoticeHours": "Age past which served data is flagged stale and gets an 'as of' notice in the UI. Set just over the 24 h daily forecast cadence so a normal same-day run is never labelled stale, but a missed daily run is.",
+
+  "forecast": {
+    "keepCycles": 4,
+    "$keepCycles": "How many recent cycles per model to retain on disk and in the catalogue, so a failed or partial run can fall back to the previous complete one. Four covers several missed daily runs within the maxStaleHours ceiling."
+  },
+
+  "radar": {
+    "keepFrames": 8,
+    "$keepFrames": "How many of the most recent radar frame images to cache as bytes per product, so a short loop still animates during a total source outage. The listing itself is kept as last-known-good regardless."
+  }
+}

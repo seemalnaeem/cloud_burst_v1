@@ -25,6 +25,7 @@ import MapView from '@/features/map/MapView'
 import { useCariChoropleth } from '@/hooks/useCariChoropleth'
 import { useWarmTimeline } from '@/hooks/useWarmTimeline'
 import { useAdvisories } from '@/hooks/useAdvisories'
+import { useIngestStatus } from '@/hooks/useIngestStatus'
 import { useRadarFrames } from '@/hooks/useRadarFrames'
 import { useContracts } from '@/hooks/useContracts'
 import { useComputedRasters } from '@/hooks/useComputedRasters'
@@ -134,9 +135,20 @@ export default function App () {
   const layers = useMemo(() => (ready ? contracts().layers.filter((l) => !HIDDEN_LAYERS.has(l.id)) : []), [ready])
   const rasterLayers = useMemo(() => (ready ? contracts().rasterLayers : []), [ready])
 
+  // The forecast ingest status behind the header "Update data" control: live
+  // progress while a run is on, and a manual trigger if the daily run is missed.
+  const { status: ingestStatus, error: ingestError, trigger: runIngest } = useIngestStatus()
+
+  // Re-read the catalogue as the ingest advances, so a band appears in the panel
+  // the moment it is catalogued rather than only after a browser refresh. The key
+  // moves on every field the run finishes and once more when the run ends.
+  const catalogRefreshKey = ingestStatus?.running
+    ? (ingestStatus.fieldIndex ?? 0)
+    : (ingestStatus?.finishedAt ?? 'idle')
+
   // Which raster layers can actually serve a tile today. Declared in the
   // contract is not the same as ingested, and the panel says which is which.
-  const { availability } = useRasterAvailability(rasterLayers)
+  const { availability } = useRasterAvailability(rasterLayers, catalogRefreshKey)
 
   // The forecast models, in contract order, with the data_type each resolves
   // against. One is active at a time and drives the map and the timeline.
@@ -329,15 +341,17 @@ export default function App () {
     })
   }, [])
 
-  const { frames: radarFrames, error: radarError } = useRadarFrames(activeRadarLayers)
+  const { frames: radarFrames, error: radarError, stale: radarStale, asOf: radarAsOf } = useRadarFrames(activeRadarLayers)
 
   // High-Alert Districts: the latest PMD rain-wind advisory, polled and matched to
   // our districts by the gateway. The overlay and its province toggles live in the
   // Analysis tab; the poll runs regardless so the data is ready when it opens.
   const {
     release: alertRelease, provinces: alertProvinces,
-    error: alertError, configured: alertConfigured
+    error: alertError, configured: alertConfigured,
+    stale: alertStale, asOf: alertAsOf
   } = useAdvisories()
+
   const [alertProvincesOn, setAlertProvincesOn] = useState(() => new Set())
   const toggleAlertProvince = useCallback((province) => {
     setAlertProvincesOn((s) => {
@@ -851,6 +865,9 @@ export default function App () {
         isDark={isDark}
         onToggleTheme={toggleTheme}
         onToggleSidebar={() => setPanelsOpen((v) => !v)}
+        ingestStatus={ingestStatus}
+        ingestError={ingestError}
+        onRunIngest={runIngest}
       />
 
       <main className="relative min-h-0 flex-1">
@@ -972,6 +989,10 @@ export default function App () {
                 onToggleAlertProvince={toggleAlertProvince}
                 alertConfigured={alertConfigured}
                 alertError={alertError}
+                alertStale={alertStale}
+                alertAsOf={alertAsOf}
+                forecastStale={forecast.stale}
+                forecastAgeHours={forecast.ageHours}
                 counts={COUNTS}
                 scales={scales}
                 opacities={opacities}
@@ -1044,6 +1065,8 @@ export default function App () {
                 onIndex={setRadarIndex}
                 products={radarProductLabels}
                 intervalMin={radarTimeline.intervalMin}
+                stale={radarStale}
+                asOf={radarAsOf}
               />
             ) : forecast.status === 'ok' && leads.length ? (
               <TimeSlider

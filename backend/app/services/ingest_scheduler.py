@@ -16,15 +16,13 @@ the stack where an unconfigured source is a no-op, not an error.
 from __future__ import annotations
 
 import asyncio
-import sys
 from datetime import datetime, timedelta, timezone
 
 from app.config import settings
 from app.db import repositories
+from app.services import ingest_run_service
 from app.shared.logging import logger
 
-# The ingest script, mounted read-only at /app/ingest in the api container.
-INGEST_SCRIPT = "/app/ingest/ingest_pmd.py"
 # Back off this long after an unexpected loop error so a persistent failure logs
 # hourly rather than spinning.
 ERROR_BACKOFF_S = 3600
@@ -33,9 +31,6 @@ ERROR_BACKOFF_S = 3600
 PKT = timezone(timedelta(hours=5))
 
 _task: asyncio.Task | None = None
-# One ingest at a time within this process: the daily run and the startup
-# catch-up must never overlap and stampede the portal.
-_running = asyncio.Lock()
 
 
 async def _newest_cycle_date():
@@ -46,37 +41,9 @@ async def _newest_cycle_date():
 
 
 async def _run_ingest(reason: str) -> None:
-    if not settings.pmd_configured:
-        logger.info("ingest_skipped_not_configured", reason=reason)
-        return
-    if _running.locked():
-        logger.info("ingest_already_running", reason=reason)
-        return
-
-    async with _running:
-        args = [sys.executable, INGEST_SCRIPT]
-        if settings.ingest_model:
-            args += ["--model", settings.ingest_model]
-        logger.info("ingest_started", reason=reason, model=settings.ingest_model or "all")
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *args,
-                cwd="/app",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            out, _ = await proc.communicate()
-        except Exception:
-            logger.exception("ingest_spawn_failed", reason=reason)
-            return
-
-        # Keep the last few lines of the script's own summary out of the log, so a
-        # failure shows what it printed without dumping every lead it fetched.
-        tail = (out or b"").decode("utf-8", "replace").splitlines()[-3:]
-        if proc.returncode == 0:
-            logger.info("ingest_finished", reason=reason, tail=tail)
-        else:
-            logger.error("ingest_failed", reason=reason, code=proc.returncode, tail=tail)
+    # Delegate to the shared run service so the scheduled run and the manual
+    # "Update data" trigger share one run at a time and one progress status.
+    await ingest_run_service.run(reason, settings.ingest_model or None)
 
 
 def _seconds_until_next_run(now_utc: datetime) -> float:

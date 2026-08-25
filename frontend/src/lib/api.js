@@ -116,6 +116,11 @@ export const radarImageUrl = (path) =>
 export const getAdvisories = (type = 'RAIN-WIND', signal) =>
   api.get('/api/upstream/advisories', { type }, { signal })
 
+// The forecast ingest: live progress for the "Update data" control, and a manual
+// trigger when the daily run needs a nudge.
+export const getIngestStatus = (signal) => api.get('/api/ingest/status', null, { signal })
+export const runIngest = () => api.post('/api/ingest/run')
+
 export const getDistricts = (province, signal) =>
   api.get('/api/districts', { province }, { signal })
 export const getDistrict = (name, signal) =>

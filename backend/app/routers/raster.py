@@ -97,7 +97,12 @@ async def _resolve_raster(
     except KeyError as exc:
         raise ValidationFailed(f"Unknown band {band_key!r}. See /api/meta/bands.") from exc
 
-    if creation_time is None and not spec.get("static"):
+    # Whether the cycle was chosen for us, in which case we may fall back to an
+    # older one; an explicit cycle from the caller is honoured exactly.
+    auto_cycle = creation_time is None
+    stale = False
+
+    if auto_cycle and not spec.get("static"):
         cycle = await repositories.latest_cycle(resolved_model)
         if cycle is None:
             raise NotConfigured(
@@ -106,8 +111,18 @@ async def _resolve_raster(
                 + (f" for model {resolved_model}" if resolved_model else ""),
             )
         creation_time = cycle["creation_time"]
+        stale = bool(cycle.get("stale"))
 
     path = await repositories.raster_path(band_key, resolved_model, creation_time, lead)
+    if path is None and auto_cycle and not spec.get("static"):
+        # The chosen cycle does not carry this band at this lead (a partial run can
+        # be missing one field). Rather than blank the layer, resolve it against the
+        # newest cycle within the staleness window that does have it.
+        fallback = await repositories.cycle_for_band(band_key, resolved_model, lead)
+        if fallback is not None and fallback != creation_time:
+            creation_time = fallback
+            stale = True
+            path = await repositories.raster_path(band_key, resolved_model, creation_time, lead)
     if path is None:
         raise NotConfigured(
             "wx.raster_catalog",
@@ -120,6 +135,7 @@ async def _resolve_raster(
         "spec": spec,
         "model": resolved_model,
         "creation_time": creation_time,
+        "stale": stale,
         "path": path,
     }
 
@@ -140,6 +156,7 @@ async def resolve(
         "model": r["model"],
         "path": r["path"],
         "creationTime": r["creation_time"],
+        "stale": r.get("stale", False),
         "leadHours": lead,
         # The gateway uses these for the tile rescale, so they come from the
         # same contract the legend reads. That is what keeps the two in step.

@@ -101,11 +101,14 @@ services:
       PMD_USER: ${PMD_USER:-}
       PMD_PASS: ${PMD_PASS:-}
       PMD_VERIFY_TLS: ${PMD_VERIFY_TLS:-false}
-      # Daily automatic forecast ingest, so the timeline tracks the current date
-      # without a manual run. Idle unless PMD is configured above.
+      # Daily automatic forecast ingest at 06:00 PKT, so the timeline tracks the
+      # current date without a manual run. Idle unless PMD is configured above.
+      # Catch-up on startup is off: the daily run and the header's "Update data"
+      # control cover refreshing, and a catch-up on every restart fought the dev
+      # server's reload. Set INGEST_CATCHUP_ON_START=true to re-enable.
       INGEST_SCHEDULE_ENABLED: ${INGEST_SCHEDULE_ENABLED:-true}
       INGEST_SCHEDULE_HOUR_PKT: ${INGEST_SCHEDULE_HOUR_PKT:-6}
-      INGEST_CATCHUP_ON_START: ${INGEST_CATCHUP_ON_START:-true}
+      INGEST_CATCHUP_ON_START: ${INGEST_CATCHUP_ON_START:-false}
       INGEST_MODEL: ${INGEST_MODEL:-}
       AOI_WEST: ${AOI_WEST:-59}
       AOI_SOUTH: ${AOI_SOUTH:-22}

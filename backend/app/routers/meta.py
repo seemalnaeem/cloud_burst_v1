@@ -8,6 +8,8 @@ backend about a display range or a class boundary.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Query
 
 from app.db import repositories
@@ -145,11 +147,25 @@ async def forecast_meta(
 
     cycles = await repositories.available_cycles(chosen["model"])
 
+    # Flag a served cycle we have not refreshed within the daily cadence, so the UI
+    # can show an "as of" notice: it means the newest complete run we hold was
+    # fetched more than a day ago, most likely because the source was unreachable at
+    # the last slot. Age is measured from discovered_at (when we ingested it), not
+    # the model's 00Z creation_time: a normally fresh run has a creation_time that
+    # is already many hours old by the time we fetch it, so timing staleness off
+    # creation_time would flag good data every afternoon.
+    notice_hours = int(contracts.load("resilience")["staleNoticeHours"])
+    fetched = chosen.get("discovered_at") or chosen["creation_time"]
+    age_hours = (datetime.now(timezone.utc) - fetched).total_seconds() / 3600
+    stale = age_hours > notice_hours
+
     return {
         "status": "ok",
         "model": chosen["model"],
         "availableModels": available,
         "creationTime": chosen["creation_time"],
+        "stale": stale,
+        "ageHours": round(age_hours, 1),
         "publishedLeads": list(chosen["published_leads"] or []),
         "leadGrid": timeutil.lead_grid(),
         "minLeadHours": time_model["history"]["minLeadHours"],

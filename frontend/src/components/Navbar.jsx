@@ -15,6 +15,7 @@ import {
 } from 'react-icons/tb'
 
 import { IconButton } from './ui/Panel'
+import IngestControl from './IngestControl'
 import ndmaLogo from '@/assets/ndma_logo.webp'
 
 // Map first, then the two analytical views, Radar last. Radar carries the alerts
@@ -45,7 +46,7 @@ function Clock () {
   )
 }
 
-export default function Navbar ({ view, onView, isDark, onToggleTheme, onToggleSidebar }) {
+export default function Navbar ({ view, onView, isDark, onToggleTheme, onToggleSidebar, ingestStatus, ingestError, onRunIngest }) {
   return (
     <header
       className="relative z-30 flex h-14 shrink-0 items-center gap-3 px-3 shadow-cb"
@@ -100,6 +101,8 @@ export default function Navbar ({ view, onView, isDark, onToggleTheme, onToggleS
       </nav>
 
       <div className="flex-1" />
+
+      <IngestControl status={ingestStatus} error={ingestError} onRun={onRunIngest} />
 
       <Clock />
 

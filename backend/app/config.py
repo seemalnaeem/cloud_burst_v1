@@ -80,7 +80,10 @@ class Settings(BaseSettings):
     # Local (Pakistan) hour of the daily run. The portal publishes the day's cycle
     # by early morning, so 06:00 PKT picks it up. PKT is a fixed UTC+5, no DST.
     ingest_schedule_hour_pkt: int = 6
-    ingest_catchup_on_start: bool = True
+    # Off by default: the daily run plus the manual "Update data" control cover
+    # refreshing, and a catch-up on every startup fought the dev server's reload,
+    # which restarts the app on each code change. Set true to re-enable.
+    ingest_catchup_on_start: bool = False
     # Restrict the daily run to one model (a data_type like GRAPES or a contract
     # id like grapes). Blank means every model in the contract.
     ingest_model: str = ""

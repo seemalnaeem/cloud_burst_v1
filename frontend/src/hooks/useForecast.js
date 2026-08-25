@@ -15,7 +15,10 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { getForecastMeta } from '@/lib/api'
 
-const EMPTY = { status: 'loading', creationTime: null, model: null, leads: [], availableModels: [] }
+const EMPTY = {
+  status: 'loading', creationTime: null, model: null, leads: [], availableModels: [],
+  stale: false, ageHours: null
+}
 
 export function useForecast (model, availabilitySignal) {
   const [state, setState] = useState(EMPTY)
@@ -30,15 +33,25 @@ export function useForecast (model, availabilitySignal) {
             creationTime: meta.creationTime,
             model: meta.model,
             leads: (meta.publishedLeads || []).slice().sort((a, b) => a - b),
-            availableModels
+            availableModels,
+            // stale means the newest complete cycle we hold is older than the
+            // daily cadence, i.e. the source likely missed its slot.
+            stale: Boolean(meta.stale),
+            ageHours: meta.ageHours ?? null
           })
         } else {
-          setState({ status: 'no_data', creationTime: null, model: meta?.model ?? null, leads: [], availableModels })
+          setState({
+            status: 'no_data', creationTime: null, model: meta?.model ?? null, leads: [], availableModels,
+            stale: false, ageHours: null
+          })
         }
       })
       .catch((err) => {
         if (err.name === 'AbortError') return
-        setState({ status: 'error', creationTime: null, model: null, leads: [], availableModels: [] })
+        setState({
+          status: 'error', creationTime: null, model: null, leads: [], availableModels: [],
+          stale: false, ageHours: null
+        })
       })
   }, [model])
 

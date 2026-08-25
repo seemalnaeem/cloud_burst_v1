@@ -9,8 +9,11 @@
 // gateway serves it transparent, so only a genuine listing failure surfaces here
 // as an error for a toast.
 //
-// Returns { frames: { [layerId]: { frames: [{ timestamp, imageUrl }] } }, error }.
-// The last known series is kept between refreshes so the loop never blanks.
+// Returns { frames: { [layerId]: { frames: [{ timestamp, imageUrl }] } }, error,
+// stale, asOf }. The last known series is kept between refreshes so the loop
+// never blanks. stale/asOf come from the gateway falling back to the last-known
+// listing when a site's live directory is unreachable: true if any active site
+// is currently stale, and asOf the oldest of those sites' fallback timestamps.
 
 import { useEffect, useState } from 'react'
 
@@ -20,6 +23,10 @@ import { radar } from '@/lib/contracts'
 export function useRadarFrames (activeLayers) {
   const [frames, setFrames] = useState({})
   const [error, setError] = useState(null)
+  // The most recent successful poll's stale/asOf per site, so the overall flag
+  // can be derived across every active site rather than just the last one to
+  // resolve.
+  const [siteStatus, setSiteStatus] = useState({})
   const sites = [...new Set(activeLayers.map((l) => l.site))].sort()
   const sitesKey = sites.join(',')
 
@@ -34,6 +41,7 @@ export function useRadarFrames (activeLayers) {
         const res = await getRadarFrames(site)
         if (cancelled) return
         setError(null)
+        setSiteStatus((prev) => ({ ...prev, [site]: { stale: Boolean(res.stale), asOf: res.asOf ?? null } }))
         setFrames((prev) => {
           const next = { ...prev }
           for (const p of res.products) {
@@ -61,5 +69,25 @@ export function useRadarFrames (activeLayers) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sitesKey])
 
-  return { frames, error }
+  // Drop status for a site that is no longer active, so a stale flag from a
+  // hidden site's controls cannot linger into the notice.
+  useEffect(() => {
+    setSiteStatus((prev) => {
+      const next = {}
+      for (const site of sites) if (prev[site]) next[site] = prev[site]
+      return next
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sitesKey])
+
+  const activeStatuses = sites.map((s) => siteStatus[s]).filter(Boolean)
+  const staleStatuses = activeStatuses.filter((s) => s.stale)
+  const stale = staleStatuses.length > 0
+  const asOf = staleStatuses.reduce((oldest, s) => {
+    if (!s.asOf) return oldest
+    if (!oldest) return s.asOf
+    return new Date(s.asOf) < new Date(oldest) ? s.asOf : oldest
+  }, null)
+
+  return { frames, error, stale, asOf }
 }

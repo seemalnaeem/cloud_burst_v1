@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.db import pool
-from app.routers import alerts, districts, events, health, meta, raster, score
+from app.routers import alerts, districts, events, health, ingest, meta, raster, score
 from app.services import ingest_scheduler
 from app.shared import contracts
 from app.shared.errors import AppError
@@ -102,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(districts.router, prefix="/api/districts", tags=["districts"])
     app.include_router(score.router, prefix="/api/score", tags=["score"])
     app.include_router(raster.router, prefix="/api/raster", tags=["raster"])
+    app.include_router(ingest.router, prefix="/api/ingest", tags=["ingest"])
     app.include_router(events.router, prefix="/api/events", tags=["events"])
     app.include_router(alerts.router, prefix="/api", tags=["alerts"])
 

@@ -28,6 +28,7 @@ import { fmtUnit } from '@/lib/format'
 
 import { LayerSwatch } from './LayerLegend'
 import LayerStyleEditor from './LayerStyleEditor'
+import StaleNotice from './StaleNotice'
 import { Panel, IconButton } from './ui/Panel'
 
 // A rod-and-thumb switch: a thin fixed rod with a large thumb that rides along
@@ -754,7 +755,11 @@ export default function LayersPanel ({
   alertProvincesOn,
   onToggleAlertProvince,
   alertConfigured = true,
-  alertError = null
+  alertError = null,
+  alertStale = false,
+  alertAsOf = null,
+  forecastStale = false,
+  forecastAgeHours = null
 }) {
   const alertOn = alertProvincesOn ?? new Set()
   // Drag reorder for the boundary layers, in the Boundaries section below. The
@@ -1008,6 +1013,14 @@ export default function LayersPanel ({
 
           {view === 'analysis' && (
             <Section label="High-Alert Districts" count={alertProvinces.length || undefined} defaultOpen={false}>
+              {/* The gateway could not reach the PMD press release page and
+                  served the last-known-good listing instead; the districts
+                  below are still that listing's, just not today's poll. */}
+              {alertConfigured && alertStale && (
+                <li className="border-b border-border/60 px-2 py-2">
+                  <StaleNotice label="advisory" asOf={alertAsOf} />
+                </li>
+              )}
               {!alertConfigured ? (
                 <li className="px-3 py-3 text-[11px] leading-snug text-muted">The advisory source is not configured.</li>
               ) : alertProvinces.length === 0 ? (
@@ -1058,6 +1071,14 @@ export default function LayersPanel ({
 
           {view === 'forecast' && models.length > 0 && (
             <Section label="Forecast models" count={availableElements.length}>
+              {/* The newest complete cycle we hold is older than the daily
+                  cadence, so the source likely missed its slot. The timeline
+                  still runs off it; this just says the run is not today's. */}
+              {forecastStale && (
+                <li className="border-b border-border/60 px-2 py-2">
+                  <StaleNotice label="forecast" ageHours={forecastAgeHours} />
+                </li>
+              )}
               <li className="border-b border-border/60 px-2 py-2">
                 <ModelSelect
                   models={models}

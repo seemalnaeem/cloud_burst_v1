@@ -270,10 +270,13 @@ CREATE TABLE wx.cycles (
   creation_time   timestamptz NOT NULL,
   published_leads integer[] NOT NULL DEFAULT '{}',
   discovered_at   timestamptz NOT NULL DEFAULT now(),
+  complete        boolean NOT NULL DEFAULT false,
   PRIMARY KEY (model, creation_time)
 );
 COMMENT ON COLUMN wx.cycles.published_leads IS
   'Leads this cycle actually published. A cycle publishes incrementally and may skip a grid point, so never assume the full grid.';
+COMMENT ON COLUMN wx.cycles.complete IS
+  'True once the ingest finished this model''s run cleanly. Readers prefer the newest complete cycle so a partial run cannot shadow a good one.';
 
 CREATE TABLE wx.raster_catalog (
   id            bigserial PRIMARY KEY,

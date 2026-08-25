@@ -86,6 +86,51 @@ export async function wrap (prefix, params, producer, { ttlSeconds = config.cach
   return promise
 }
 
+/**
+ * The last successfully cached value for a key, regardless of how stale.
+ *
+ * `wrap` treats an entry past its TTL as absent so it refetches. But when that
+ * refetch fails because the upstream is down, a stale entry is far better than a
+ * blank surface, so this reads it anyway and reports its age. `maxStaleSeconds`
+ * caps how old a fallback may be; older than that returns null and the caller
+ * shows its not-available state. Returns { value, ageSeconds } or null.
+ */
+export async function lastGood (prefix, params, maxStaleSeconds = Infinity) {
+  try {
+    const raw = await fs.readFile(pathFor(keyFor(prefix, params)), 'utf8')
+    const entry = JSON.parse(raw)
+    const ageSeconds = (Date.now() - entry.storedAt) / 1000
+    if (ageSeconds > maxStaleSeconds) return null
+    return { value: entry.value, ageSeconds, storedAt: entry.storedAt }
+  } catch {
+    return null
+  }
+}
+
+const bytesPathFor = (prefix, params) => path.join(config.cache.dir, `${keyFor(prefix, params)}.bin`)
+
+/**
+ * Cache raw bytes (a radar frame image) so a short loop still plays during a
+ * total source outage. Written atomically like the JSON entries.
+ */
+export async function putBytes (prefix, params, buffer) {
+  const target = bytesPathFor(prefix, params)
+  const temp = `${target}.${process.pid}.tmp`
+  await fs.mkdir(config.cache.dir, { recursive: true })
+  await fs.writeFile(temp, buffer)
+  await fs.rename(temp, target)
+}
+
+/** The cached bytes for a key, or null if none. Ignores age; the listing route
+ * is what decides a product has gone stale, an individual frame is best effort. */
+export async function getBytes (prefix, params) {
+  try {
+    return await fs.readFile(bytesPathFor(prefix, params))
+  } catch {
+    return null
+  }
+}
+
 export async function invalidate (prefix) {
   try {
     const files = await fs.readdir(config.cache.dir)
@@ -148,4 +193,4 @@ export function startPruneTimer () {
   return timer
 }
 
-export const cache = { wrap, invalidate, status, prune, startPruneTimer }
+export const cache = { wrap, lastGood, putBytes, getBytes, invalidate, status, prune, startPruneTimer }

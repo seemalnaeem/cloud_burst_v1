@@ -8,12 +8,16 @@
 // A layer is available when its band is catalogued. A cycle driven layer needs a
 // forecast run as well, and none exists yet, which is a different sentence from
 // "the file is missing" and worth saying differently.
+//
+// The catalogue is re-read whenever refreshKey changes. An ingest catalogues one
+// band at a time, so passing its progress as the key makes each new layer appear
+// in the panel the moment it lands, with no browser refresh.
 
 import { useEffect, useState } from 'react'
 
 import { getRasterCatalog } from '@/lib/api'
 
-export function useRasterAvailability (rasterLayers) {
+export function useRasterAvailability (rasterLayers, refreshKey = 0) {
   const [bands, setBands] = useState(null)
   const [error, setError] = useState(null)
 
@@ -32,7 +36,7 @@ export function useRasterAvailability (rasterLayers) {
       })
 
     return () => controller.abort()
-  }, [])
+  }, [refreshKey])
 
   // Keyed on band and model together, because the same band exists under several
   // models now (pmd_cape under GRAPES and WRFPRS), and a layer is available only

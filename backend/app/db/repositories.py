@@ -10,7 +10,14 @@ import json
 from typing import Any
 
 from app.db import pool
+from app.shared import contracts
 from app.shared.errors import DistrictNotFound
+
+
+def _max_stale_hours() -> int:
+    """The ceiling on how old a fallback cycle may be, from the resilience
+    contract. Beyond it a cycle is not served as a stand-in for fresh data."""
+    return int(contracts.load("resilience")["maxStaleHours"])
 
 
 async def list_districts(province: str | None = None) -> list[dict[str, Any]]:
@@ -326,46 +333,102 @@ async def catalog_computed_raster(
 
 
 async def latest_cycle(model: str | None = None) -> dict[str, Any] | None:
-    """The newest cycle, for one model or across all of them.
+    """The cycle a reader should serve, for one model or across all of them.
 
-    A model is passed for a forecast layer, because two models publish a cycle at
-    the same hour and the layer must scrub its own model's run. No model is the
-    fallback for a caller that only wants "is anything ingested".
+    Not simply the newest by time. A run that failed or was interrupted can leave a
+    newest-but-incomplete cycle, and serving it would blank the layers it never got
+    to. So the preference is: the newest COMPLETE cycle within the staleness cap; if
+    none is complete (e.g. straight after a fresh install, or every recent run was
+    partial) the newest cycle within the cap, so partial data still beats none; and
+    nothing at all past the cap, so a reader shows its not-available state rather
+    than misleadingly old weather.
+
+    The returned dict carries `complete` and `stale` so the API can tell the client
+    it is looking at a fallback and how old it is. A model is passed for a forecast
+    layer, because two models publish a cycle at the same hour and the layer must
+    scrub its own model's run. No model is the fallback for "is anything ingested".
     """
-    if model:
-        row = await pool.fetchrow(
-            """
-            SELECT creation_time, model, published_leads
-            FROM wx.cycles
-            WHERE model = $1
-            ORDER BY creation_time DESC
-            LIMIT 1
-            """,
-            model,
-        )
-    else:
-        row = await pool.fetchrow(
-            """
-            SELECT creation_time, model, published_leads
-            FROM wx.cycles
-            ORDER BY creation_time DESC
-            LIMIT 1
-            """
-        )
-    return dict(row) if row else None
+    cap = _max_stale_hours()
+    where_model = "AND model = $1" if model else ""
+    args = [model] if model else []
+    # ORDER BY complete first so a complete cycle wins over a newer partial one,
+    # then by time; the cap keeps a very old run from standing in silently.
+    row = await pool.fetchrow(
+        f"""
+        SELECT creation_time, model, published_leads, complete
+        FROM wx.cycles
+        WHERE creation_time >= now() - make_interval(hours => {cap}) {where_model}
+        ORDER BY complete DESC, creation_time DESC
+        LIMIT 1
+        """,
+        *args,
+    )
+    if not row:
+        return None
+    out = dict(row)
+    newest = await pool.fetchrow(
+        f"SELECT creation_time FROM wx.cycles WHERE true {where_model} "
+        "ORDER BY creation_time DESC LIMIT 1",
+        *args,
+    )
+    # Stale when the served cycle is not the absolute newest run (we stepped back to
+    # a complete one), so the client can flag it. Age-based labelling is layered on
+    # top in the service from staleNoticeHours.
+    out["stale"] = bool(newest and newest["creation_time"] != out["creation_time"])
+    return out
+
+
+async def cycle_for_band(band_key: str, model: str | None, lead_hours: int | None) -> Any | None:
+    """The creation_time of the best cycle that actually holds this band and lead.
+
+    Cycle selection is per model, but a partial newest-complete cycle can be missing
+    an individual band that an older cycle still has. Rather than blank that one
+    layer, resolve it against the newest cycle (complete preferred) within the cap
+    that carries it. Returns None when no cycle in the window has it.
+    """
+    cap = _max_stale_hours()
+    return await pool.fetchval(
+        f"""
+        SELECT rc.creation_time
+        FROM wx.raster_catalog rc
+        JOIN wx.cycles cy ON cy.model = rc.model AND cy.creation_time = rc.creation_time
+        WHERE rc.band_key = $1 AND rc.model = $2 AND rc.lead_hours = $3
+          AND rc.creation_time >= now() - make_interval(hours => {cap})
+        ORDER BY cy.complete DESC, rc.creation_time DESC
+        LIMIT 1
+        """,
+        band_key,
+        model,
+        lead_hours,
+    )
+
+
+async def last_ingest_time() -> Any | None:
+    """When a cycle was most recently registered, in wall-clock time.
+
+    discovered_at is stamped on every successful ingest of a cycle, not only the
+    first, so its maximum is the honest "data last refreshed" moment. It survives an
+    API restart, unlike the in-process run status, which is why the header's
+    freshness guard reads it rather than the last run's finish time.
+    """
+    return await pool.fetchval("SELECT MAX(discovered_at) FROM wx.cycles")
 
 
 async def forecast_models() -> list[dict[str, Any]]:
-    """The latest cycle per model, for the model selector and per-model timeline.
+    """The serving cycle per model, for the model selector and per-model timeline.
 
-    One row per model, its newest cycle and the leads that cycle published. The
-    panel offers exactly these models and the slider draws exactly these leads.
+    One row per model, the cycle a reader should serve and the leads it published.
+    Same preference as latest_cycle: newest complete within the staleness cap wins
+    over a newer partial one, so the slider draws a finished run's leads rather than
+    a half-written run's. The panel offers exactly these models.
     """
+    cap = _max_stale_hours()
     rows = await pool.fetch(
-        """
-        SELECT DISTINCT ON (model) model, creation_time, published_leads
+        f"""
+        SELECT DISTINCT ON (model) model, creation_time, published_leads, complete, discovered_at
         FROM wx.cycles
-        ORDER BY model, creation_time DESC
+        WHERE creation_time >= now() - make_interval(hours => {cap})
+        ORDER BY model, complete DESC, creation_time DESC
         """
     )
     return [dict(r) for r in rows]

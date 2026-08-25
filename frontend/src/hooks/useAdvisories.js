@@ -17,6 +17,10 @@ export function useAdvisories (enabled = true, type = 'RAIN-WIND') {
   const [data, setData] = useState({ release: null, provinces: [], byCode: {} })
   const [error, setError] = useState(null)
   const [configured, setConfigured] = useState(true)
+  // stale/asOf: the gateway served the last-known-good advisory listing because
+  // the live PMD press release page was unreachable.
+  const [stale, setStale] = useState(false)
+  const [asOf, setAsOf] = useState(null)
 
   useEffect(() => {
     if (!enabled) return
@@ -30,6 +34,8 @@ export function useAdvisories (enabled = true, type = 'RAIN-WIND') {
         setData({ release: res.release ?? null, provinces: res.provinces ?? [], byCode: res.byCode ?? {} })
         setError(null)
         setConfigured(true)
+        setStale(Boolean(res.stale))
+        setAsOf(res.asOf ?? null)
       } catch (err) {
         if (cancelled) return
         if (err?.status === 501 || err?.code === 'NOT_CONFIGURED') {
@@ -47,5 +53,5 @@ export function useAdvisories (enabled = true, type = 'RAIN-WIND') {
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
   }, [enabled, type])
 
-  return { ...data, error, configured }
+  return { ...data, error, configured, stale, asOf }
 }

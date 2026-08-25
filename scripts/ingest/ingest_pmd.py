@@ -33,6 +33,7 @@ wx.cycles so the timeline can discover it per model.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 import warnings
@@ -121,6 +122,13 @@ def build_plan() -> dict[str, dict]:
 
 def log(m: str) -> None:
     print(m, flush=True)
+
+
+def emit_progress(obj: dict) -> None:
+    """A machine-readable progress line the API's ingest service parses to drive
+    the "Update data" control's bar. JSON keeps field labels with spaces intact;
+    the @@INGEST prefix separates it from the human log."""
+    print("@@INGEST " + json.dumps(obj), flush=True)
 
 
 class Pmd:
@@ -231,12 +239,55 @@ def parse_cycle(data_time: str) -> datetime:
 def register_cycle(env: dict, model: str, cycle: datetime, leads: list[int]) -> None:
     iso = cycle.isoformat()
     leads_arr = "{" + ",".join(str(x) for x in sorted(set(leads))) + "}"
+    # discovered_at is bumped on conflict too, so it always marks the last time we
+    # successfully ingested this cycle. That is the freshness signal the UI reads:
+    # re-fetching the same 00Z run day after day (when the source has not advanced)
+    # must still count as fresh, not drift into "stale" because the row is old.
     psql(
         "INSERT INTO wx.cycles (model, creation_time, published_leads) "
         f"VALUES ('{model}', '{iso}', '{leads_arr}') "
-        "ON CONFLICT (model, creation_time) DO UPDATE SET published_leads = EXCLUDED.published_leads",
+        "ON CONFLICT (model, creation_time) DO UPDATE SET "
+        "published_leads = EXCLUDED.published_leads, discovered_at = now()",
         env,
     )
+
+
+def mark_cycle_complete(env: dict, model: str, cycle: datetime) -> None:
+    """Flag a cycle as a finished run, so readers prefer it over a half-written one."""
+    psql(
+        f"UPDATE wx.cycles SET complete = true WHERE model = '{model}' "
+        f"AND creation_time = '{cycle.isoformat()}'",
+        env,
+    )
+
+
+def prune_old_cycles(env: dict, model: str) -> None:
+    """Keep only the most recent cycles for a model, deleting older ones and their
+    COG files. Retention comes from the resilience contract, not a literal here.
+
+    The catalogue rows go by cascade when the cycle row is deleted; the COG files
+    on disk are ours to remove, matched by the cycle stamp in their name. A cycle
+    inside the retention window is never touched, so the fallback data survives.
+    """
+    keep = int(contracts.load("resilience")["forecast"]["keepCycles"])
+    # Two forms per row: the exact UTC ISO literal to delete by, and the YYYYMMDDHH
+    # stamp (in UTC, matching how the COGs were named) to glob their files.
+    rows = psql(
+        "SELECT to_char(creation_time AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS+00'), "
+        "to_char(creation_time AT TIME ZONE 'UTC', 'YYYYMMDDHH24') "
+        f"FROM wx.cycles WHERE model = '{model}' ORDER BY creation_time DESC OFFSET {keep}",
+        env,
+    ).strip()
+    if not rows:
+        return
+    for line in rows.splitlines():
+        if "|" not in line:
+            continue
+        iso, stamp = line.split("|", 1)
+        for cog in settings.cog_dir.glob(f"{model}_*_{stamp}_t*.tif"):
+            cog.unlink(missing_ok=True)
+        psql(f"DELETE FROM wx.cycles WHERE model = '{model}' AND creation_time = '{iso}'", env)
+        log(f"  pruned cycle {stamp} beyond the {keep}-cycle window")
 
 
 def catalogue(env: dict, model: str, band_key: str, cycle: datetime, lead: int, path: Path, spec: dict) -> None:
@@ -257,18 +308,25 @@ def catalogue(env: dict, model: str, band_key: str, cycle: datetime, lead: int, 
     )
 
 
-def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | None) -> int:
-    """Ingest every field of one model. Returns the number of steps catalogued."""
+def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | None, prog: dict | None = None) -> int:
+    """Ingest every field of one model. Returns the number of steps catalogued.
+
+    prog, when given, carries {'index','total_fields'} across models so the emitted
+    progress can say "field 7 of 32"; it is advanced once per field here.
+    """
     log(f"[{dt}] {entry['label']}, {len(entry['items'])} fields")
-    # Rebuild the model from scratch, so a re-run that changes how a lead is
-    # computed cannot leave stale rows at the old lead. Only this model's rows go;
-    # other models and the static terrain rows are untouched.
-    psql(f"DELETE FROM wx.raster_catalog WHERE model = '{dt}'", env)
+    # The old rows are NOT deleted up front. A run that cannot reach the upstream
+    # would then delete the model and fail to refill it, blanking the map; that is
+    # the failure this ingest is built to avoid. Instead the previous cycles stay
+    # in place as a fallback, only this run's own cycle is rebuilt (once its time
+    # is known, below), and stale cycles are pruned after the run succeeds.
     cycle_dt: datetime | None = None
     all_leads: list[int] = []
     total = 0
 
     for element, level, band_key in entry["items"]:
+        if prog is not None:
+            prog["index"] += 1
         try:
             spec = contracts.band(band_key)
         except KeyError:
@@ -276,13 +334,21 @@ def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | Non
             continue
 
         records = pmd.latest(dt, element, level)
-        if not records:
-            log(f"  {element:8} {('sfc' if level == 0 else str(level)+'hPa'):7} no data, skipping")
-            continue
-
         records.sort(key=lambda r: r["forecast_time"])
         if max_leads:
             records = records[:max_leads]
+
+        if prog is not None:
+            emit_progress({
+                "phase": "field", "model": dt, "modelLabel": entry["label"],
+                "element": element, "level": level, "band": band_key,
+                "label": spec.get("label", band_key) + ("" if level == 0 else f" {level} hPa"),
+                "steps": len(records), "index": prog["index"], "totalFields": prog["total_fields"],
+            })
+
+        if not records:
+            log(f"  {element:8} {('sfc' if level == 0 else str(level)+'hPa'):7} no data, skipping")
+            continue
 
         # Precipitation is stored as a per-hour rate, not the raw per-step total, so
         # the models line up on one honest unit (mm/hr) and the ensemble can average
@@ -293,10 +359,16 @@ def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | Non
         # The cycle must exist before anything is catalogued against it, because
         # the catalogue has a foreign key onto wx.cycles. Register it from the
         # first field that returns data, then refine published_leads at the end.
+        # It starts incomplete; only a run that reaches the end is marked complete.
         if cycle_dt is None:
             cycle_dt = parse_cycle(records[0]["data_time"])
             field_leads = [x for r in records if (x := lead_from_cycle(cycle_dt, r["forecast_time"])) >= 0]
             register_cycle(env, dt, cycle_dt, field_leads)
+            # Rebuild only this cycle's rows, so a re-run that changes how a lead is
+            # computed cannot leave a stale row at the old lead, while older cycles
+            # (the fallback) and other models are untouched.
+            iso = cycle_dt.isoformat()
+            psql(f"DELETE FROM wx.raster_catalog WHERE model = '{dt}' AND creation_time = '{iso}'", env)
 
         step = time.time()
         done = 0
@@ -368,6 +440,8 @@ def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | Non
                 catalogue(env, dt, band_key, cycle_dt, lead, target, spec)
                 all_leads.append(lead)
                 done += 1
+                if prog is not None:
+                    emit_progress({"phase": "step", "done": done, "total": len(records)})
             except Exception as exc:
                 log(f"  {element} {level} lead {lead}: {type(exc).__name__} {exc}, skipping")
                 continue
@@ -378,9 +452,18 @@ def ingest_model(pmd: Pmd, env: dict, dt: str, entry: dict, max_leads: int | Non
 
     if cycle_dt is not None:
         register_cycle(env, dt, cycle_dt, all_leads)
+        # Reaching here means the run finished this model rather than being killed
+        # mid-flight (a reload, an OOM). Mark the cycle complete so readers prefer
+        # it, then drop cycles beyond the retention window so old runs and their
+        # COGs do not accumulate. Both happen only on success, so a fallback is
+        # never pruned by a run that then fails to replace it.
+        mark_cycle_complete(env, dt, cycle_dt)
+        prune_old_cycles(env, dt)
         log(f"  cycle {cycle_dt:%Y-%m-%d %H:%MZ}, {len(set(all_leads))} distinct leads\n")
     else:
-        log("  nothing ingested for this model\n")
+        # Nothing came back, most likely the upstream is down. The previous cycles
+        # are deliberately left untouched so the portal keeps serving them.
+        log("  nothing ingested for this model, keeping the previous data\n")
     return total
 
 
@@ -417,9 +500,12 @@ def main() -> int:
 
     started = time.time()
     grand = 0
+    prog = {"index": 0, "total_fields": sum(len(e["items"]) for e in plan.values())}
+    emit_progress({"phase": "plan", "totalFields": prog["total_fields"], "models": len(plan)})
     for dt, entry in plan.items():
-        grand += ingest_model(pmd, env, dt, entry, args.max_leads)
+        grand += ingest_model(pmd, env, dt, entry, args.max_leads, prog)
 
+    emit_progress({"phase": "done", "totalSteps": grand})
     log(f"Total {grand} steps across {len(plan)} model(s) in {time.time() - started:.0f}s")
     return 0 if grand else 1
 

@@ -89,22 +89,41 @@ upstreamRouter.get('/radar', async (req, res, next) => {
       throw new AppError('VALIDATION_FAILED', `Unknown radar site ${site}. See /api/meta/radar.`)
     }
 
-    const products = await cache.wrap(
-      'radar',
-      { site },
-      async () => {
-        const settled = await Promise.all(
-          contract.products.map((p) =>
-            listFrames(config.external.pmdRadarBase, contract.pathPrefix, site, p).catch(() => null)
-          )
-        )
-        return settled.filter(Boolean)
-      },
-      { ttlSeconds: 120 }
-    )
+    const maxStaleSeconds = load('resilience').maxStaleHours * 3600
 
-    res.setHeader('Cache-Control', 'public, max-age=120')
-    res.json({ site, products })
+    let products
+    let stale = false
+    let asOf = null
+    try {
+      products = await cache.wrap(
+        'radar',
+        { site },
+        async () => {
+          const settled = await Promise.all(
+            contract.products.map((p) =>
+              listFrames(config.external.pmdRadarBase, contract.pathPrefix, site, p).catch(() => null)
+            )
+          )
+          const ok = settled.filter(Boolean)
+          // Throw rather than return empty, so a total outage does not overwrite
+          // the last good listing with nothing. The catch below then serves it.
+          if (ok.length === 0) throw new AppError('UPSTREAM_ERROR', 'No radar products reachable.')
+          return ok
+        },
+        { ttlSeconds: 120 }
+      )
+    } catch (err) {
+      const lg = await cache.lastGood('radar', { site }, maxStaleSeconds)
+      if (!lg || !lg.value?.length) throw err
+      products = lg.value
+      stale = true
+      asOf = new Date(lg.storedAt).toISOString()
+    }
+
+    // A stale listing must not be cached at the edge for long, or a client keeps
+    // it after the source recovers. Fresh data keeps the normal short cache.
+    res.setHeader('Cache-Control', stale ? 'public, max-age=30' : 'public, max-age=120')
+    res.json({ site, products, stale, asOf })
   } catch (err) {
     next(err)
   }
@@ -137,9 +156,18 @@ upstreamRouter.get('/radar/image', async (req, res, next) => {
         allowStatus: [404]
       })
     } catch {
+      // Source unreachable. A recent copy of this exact frame keeps the loop
+      // animating through a total outage; only if we never cached it do we fall
+      // back to a transparent frame.
+      const cached = await cache.getBytes('frame', { path: safePath })
+      res.setHeader('Content-Type', 'image/png')
+      if (cached) {
+        res.setHeader('Cache-Control', 'public, max-age=30')
+        res.setHeader('X-Radar-Frame', 'cached')
+        return res.status(200).end(cached)
+      }
       // A short cache here, not the frame's usual six, so a frame that fails once
       // and recovers is retried on the next loop rather than stuck empty.
-      res.setHeader('Content-Type', 'image/png')
       res.setHeader('Cache-Control', 'public, max-age=30')
       return res.status(200).end(EMPTY_TILE)
     }
@@ -152,8 +180,12 @@ upstreamRouter.get('/radar/image', async (req, res, next) => {
       return res.status(200).end(EMPTY_TILE)
     }
 
+    // Buffer the frame so it can be both served now and kept as a fallback for the
+    // next outage. Frames are small PNGs, so holding one in memory is cheap.
+    const buf = Buffer.from(await upstream.body.arrayBuffer())
+    cache.putBytes('frame', { path: safePath }, buf).catch(() => {})
     res.setHeader('Cache-Control', 'public, max-age=120')
-    upstream.body.pipe(res)
+    res.status(200).end(buf)
   } catch (err) {
     next(err)
   }
@@ -175,27 +207,42 @@ upstreamRouter.get('/advisories', async (req, res, next) => {
     }
 
     const type = String(req.query.type || 'RAIN-WIND')
-    const data = await cache.wrap(
-      'advisories',
-      { type },
-      async () => {
-        const base = config.external.pmdPressBase
-        const listUrl = `${base}?type=${encodeURIComponent(type)}`
-        const listHtml = await http.getText(listUrl, { timeoutMs: 30000 })
-        const id = newestReleaseId(listHtml)
-        if (!id) return { release: null, provinces: [], byCode: {} }
+    const maxStaleSeconds = load('resilience').maxStaleHours * 3600
 
-        const detailUrl = `${base}/${id}?type=${encodeURIComponent(type)}`
-        const detailHtml = await http.getText(detailUrl, { timeoutMs: 30000 })
-        const districts = load('districts').districts
-        const lut = load('alert-lut')
-        return buildAdvisory({ listHtml, detailHtml, detailUrl, id }, districts, lut)
-      },
-      { ttlSeconds: 600 }
-    )
+    let data
+    let stale = false
+    let asOf = null
+    try {
+      data = await cache.wrap(
+        'advisories',
+        { type },
+        async () => {
+          const base = config.external.pmdPressBase
+          const listUrl = `${base}?type=${encodeURIComponent(type)}`
+          const listHtml = await http.getText(listUrl, { timeoutMs: 30000 })
+          const id = newestReleaseId(listHtml)
+          if (!id) return { release: null, provinces: [], byCode: {} }
 
-    res.setHeader('Cache-Control', 'public, max-age=600')
-    res.json(data)
+          const detailUrl = `${base}/${id}?type=${encodeURIComponent(type)}`
+          const detailHtml = await http.getText(detailUrl, { timeoutMs: 30000 })
+          const districts = load('districts').districts
+          const lut = load('alert-lut')
+          return buildAdvisory({ listHtml, detailHtml, detailUrl, id }, districts, lut)
+        },
+        { ttlSeconds: 600 }
+      )
+    } catch (err) {
+      // Source unreachable: serve the last advisory we parsed, flagged stale, so
+      // the alert list does not empty on a blip. Nothing cached yet re-raises.
+      const lg = await cache.lastGood('advisories', { type }, maxStaleSeconds)
+      if (!lg || !lg.value) throw err
+      data = lg.value
+      stale = true
+      asOf = new Date(lg.storedAt).toISOString()
+    }
+
+    res.setHeader('Cache-Control', stale ? 'public, max-age=60' : 'public, max-age=600')
+    res.json({ ...data, stale, asOf })
   } catch (err) {
     next(err)
   }

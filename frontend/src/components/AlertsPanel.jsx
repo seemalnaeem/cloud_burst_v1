@@ -28,8 +28,8 @@ function Stepper ({ provinces, provincesOn, onStep }) {
   return (
     <div className="mx-3 mb-2 flex items-center gap-2 rounded-cb-sm border border-border bg-panel-2/50 px-2 py-1.5">
       <span className="shrink-0 text-[9.5px] font-semibold uppercase tracking-[0.07em] text-muted">Review</span>
-      <span className="min-w-0 flex-1 truncate text-center text-[11px] font-medium text-text">
-        {focused || 'Step through provinces'}
+      <span className={`min-w-0 flex-1 truncate text-center text-[11px] font-medium ${focused ? 'text-text' : 'text-muted'}`}>
+        {focused || 'All provinces'}
       </span>
       <button type="button" onClick={() => onStep(-1)} aria-label="Previous province" className={btn}>
         <TbChevronLeft className="text-[13px]" aria-hidden />
@@ -42,7 +42,11 @@ function Stepper ({ provinces, provincesOn, onStep }) {
 }
 
 export default function AlertsPanel ({ release, provinces = [], cari = {}, configured = true, error, provincesOn, onStepAlert }) {
-  const total = provinces.reduce((n, p) => n + p.districts.length, 0)
+  // When the stepper has singled out one province, the carousel and the count
+  // follow it; otherwise every province's alerts scroll, as they do by default.
+  const focused = provincesOn?.size === 1 ? [...provincesOn][0] : null
+  const shown = focused ? provinces.filter((p) => p.province === focused) : provinces
+  const total = shown.reduce((n, p) => n + p.districts.length, 0)
   const has = Boolean(release) && provinces.length > 0
 
   return (
@@ -75,7 +79,7 @@ export default function AlertsPanel ({ release, provinces = [], cari = {}, confi
       ) : (
         <>
           <Stepper provinces={provinces} provincesOn={provincesOn} onStep={onStepAlert} />
-          <AlertsCarousel provinces={provinces} cari={cari} />
+          <AlertsCarousel key={focused || 'all'} provinces={shown} cari={cari} />
         </>
       )}
     </Panel>

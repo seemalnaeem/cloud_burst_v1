@@ -361,15 +361,24 @@ export default function App () {
       return next
     })
   }, [])
-  // Step through the advisory provinces one at a time: focus exactly one, flash
-  // only its districts, and fly the map to it, so an operator can review each
-  // region's alert in turn. dir is +1 (next) or -1 (previous), wrapping around.
+  // Step through the advisory provinces. The cycle is [All, province1, ...]: "All"
+  // is the default auto view (every province's alerts scroll, nothing singled out
+  // on the map), and each province focuses exactly one, flashing only its districts
+  // and flying the map to it, so an operator can review a region on its own and
+  // step back to the overview. dir is +1 (next) or -1 (previous), wrapping around.
   const stepAlert = useCallback((dir) => {
     const names = alertProvinces.map((p) => p.province)
     if (!names.length) return
-    const curr = alertProvincesOn.size === 1 ? names.indexOf([...alertProvincesOn][0]) : -1
-    const next = ((curr + dir) % names.length + names.length) % names.length
-    const target = names[next]
+    const positions = [null, ...names] // null is the "All" overview position
+    const currName = alertProvincesOn.size === 1 ? [...alertProvincesOn][0] : null
+    const curr = positions.indexOf(currName)
+    const next = ((curr + dir) % positions.length + positions.length) % positions.length
+    const target = positions[next]
+    if (target == null) {
+      setAlertProvincesOn(new Set())
+      if (map) fitToBounds(map, DEFAULT_BOUNDS, 56)
+      return
+    }
     setAlertProvincesOn(new Set([target]))
     getProvinceExtent(target)
       .then(({ extent }) => { if (extent && map) fitToExtent(map, extent, 48) })

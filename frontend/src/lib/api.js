@@ -96,6 +96,8 @@ export const getBands = (signal) => api.get('/api/meta/bands', null, { signal })
 export const getLayers = (signal) => api.get('/api/meta/layers', null, { signal })
 export const getLayerExtent = (layerId, signal) =>
   api.get('/api/meta/layer-extent', { layer: layerId }, { signal })
+export const getProvinceExtent = (province, signal) =>
+  api.get('/api/meta/province-extent', { province }, { signal })
 export const getBasemaps = (signal) => api.get('/api/meta/basemaps', null, { signal })
 export const getPalettes = (signal) => api.get('/api/meta/palettes', null, { signal })
 export const getModels = (signal) => api.get('/api/meta/models', null, { signal })

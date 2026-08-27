@@ -33,7 +33,7 @@ import { useForecast } from '@/hooks/useForecast'
 import { useRasterAvailability } from '@/hooks/useRasterAvailability'
 import { useRasterPrefetch } from '@/hooks/useRasterPrefetch'
 import { useTheme } from '@/hooks/useTheme'
-import { getLayerExtent, getRasterPoint } from '@/lib/api'
+import { getLayerExtent, getProvinceExtent, getRasterPoint } from '@/lib/api'
 import { availableBasemaps, defaultBasemapId, findBasemap, hasMapboxToken } from '@/lib/basemaps'
 import { cariClasses, contracts, radarBounds, radarLayers, radarRing, rasterScale } from '@/lib/contracts'
 import { DEFAULT_BOUNDS, fitToBounds, fitToExtent } from '@/lib/map'
@@ -361,6 +361,20 @@ export default function App () {
       return next
     })
   }, [])
+  // Step through the advisory provinces one at a time: focus exactly one, flash
+  // only its districts, and fly the map to it, so an operator can review each
+  // region's alert in turn. dir is +1 (next) or -1 (previous), wrapping around.
+  const stepAlert = useCallback((dir) => {
+    const names = alertProvinces.map((p) => p.province)
+    if (!names.length) return
+    const curr = alertProvincesOn.size === 1 ? names.indexOf([...alertProvincesOn][0]) : -1
+    const next = ((curr + dir) % names.length + names.length) % names.length
+    const target = names[next]
+    setAlertProvincesOn(new Set([target]))
+    getProvinceExtent(target)
+      .then(({ extent }) => { if (extent && map) fitToExtent(map, extent, 48) })
+      .catch(() => {})
+  }, [alertProvinces, alertProvincesOn, map])
   // The district codes currently flashing: every on province's districts. Fed to
   // the map only in the Analysis tab.
   const alertDistrictCodes = useMemo(() => {
@@ -990,6 +1004,7 @@ export default function App () {
                 alertProvinces={alertProvinces}
                 alertProvincesOn={alertProvincesOn}
                 onToggleAlertProvince={toggleAlertProvince}
+                onStepAlert={stepAlert}
                 alertConfigured={alertConfigured}
                 alertError={alertError}
                 alertStale={alertStale}

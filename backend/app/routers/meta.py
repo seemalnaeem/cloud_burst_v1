@@ -57,6 +57,15 @@ async def layer_extent(layer: str = Query(..., description="Layer id from layers
     return {"layer": layer, "extent": extent}
 
 
+@router.get("/province-extent")
+async def province_extent(province: str = Query(..., description="Province name")) -> dict:
+    """The geographic extent of a province, for the High-Alert stepper's fly-to."""
+    extent = await repositories.province_extent(province)
+    if extent is None:
+        raise ValidationFailed(f"Unknown province {province!r}.")
+    return {"province": province, "extent": extent}
+
+
 @router.get("/basemaps")
 async def basemaps() -> dict:
     """Basemap catalogue and available projections.

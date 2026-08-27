@@ -20,7 +20,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   TbStack2, TbEye, TbEyeOff, TbLayersOff, TbClockPause, TbClockHour4,
-  TbChevronRight, TbChevronDown, TbCheck, TbViewfinder, TbGripVertical, TbRadar2
+  TbChevronRight, TbChevronLeft, TbChevronDown, TbCheck, TbViewfinder, TbGripVertical, TbRadar2
 } from 'react-icons/tb'
 
 import { radarScale } from '@/lib/contracts'
@@ -754,6 +754,7 @@ export default function LayersPanel ({
   alertProvinces = [],
   alertProvincesOn,
   onToggleAlertProvince,
+  onStepAlert,
   alertConfigured = true,
   alertError = null,
   alertStale = false,
@@ -1043,6 +1044,37 @@ export default function LayersPanel ({
                       {alertRelease.date && <p className="mt-1 text-[10px] text-muted">Issued {alertRelease.date}</p>}
                     </li>
                   )}
+                  {onStepAlert && alertProvinces.length > 1 && (() => {
+                    // Reviewing one province at a time is exactly one on; the label
+                    // then names it, otherwise it invites a first step.
+                    const focused = alertOn.size === 1 ? [...alertOn][0] : null
+                    return (
+                      <li className="flex items-center gap-2 border-b border-border/60 bg-panel-2/40 px-3 py-1.5">
+                        <span className="shrink-0 text-[9.5px] font-semibold uppercase tracking-[0.07em] text-muted">Review</span>
+                        <span className="min-w-0 flex-1 truncate text-center text-[11px] font-medium text-text">
+                          {focused || 'Step through provinces'}
+                        </span>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => onStepAlert(-1)}
+                            aria-label="Previous province"
+                            className="grid h-6 w-6 place-items-center rounded-cb-sm border border-border bg-panel text-text-2 transition-colors hover:border-border-strong hover:text-text"
+                          >
+                            <TbChevronLeft className="text-[13px]" aria-hidden />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onStepAlert(1)}
+                            aria-label="Next province"
+                            className="grid h-6 w-6 place-items-center rounded-cb-sm border border-border bg-panel text-text-2 transition-colors hover:border-border-strong hover:text-text"
+                          >
+                            <TbChevronRight className="text-[13px]" aria-hidden />
+                          </button>
+                        </div>
+                      </li>
+                    )
+                  })()}
                   {alertProvinces.map((p) => {
                     const on = alertOn.has(p.province)
                     return (

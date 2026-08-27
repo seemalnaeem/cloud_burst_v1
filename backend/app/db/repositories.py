@@ -267,6 +267,26 @@ async def layer_extent(layer_id: str) -> dict[str, float] | None:
     return {"west": row["west"], "south": row["south"], "east": row["east"], "north": row["north"]}
 
 
+async def province_extent(province: str) -> dict[str, float] | None:
+    """Bounding box of every district in a province, in EPSG:4326.
+
+    Drives the High-Alert stepper's fly-to: geo.districts carries all six alert
+    provinces (Azad Kashmir and Gilgit Baltistan included), so the extent is taken
+    from it rather than geo.provinces. Returns None for an unknown province name.
+    """
+    row = await pool.fetchrow(
+        """
+        SELECT ST_XMin(e) AS west, ST_YMin(e) AS south,
+               ST_XMax(e) AS east, ST_YMax(e) AS north
+        FROM (SELECT ST_Extent(geom) AS e FROM geo.districts WHERE province = $1) s
+        """,
+        province,
+    )
+    if not row or row["west"] is None:
+        return None
+    return {"west": row["west"], "south": row["south"], "east": row["east"], "north": row["north"]}
+
+
 async def districts_for_matrix(tolerance_deg: float = 0.005) -> list[dict[str, Any]]:
     """Every district as (name, province, geometry), for the terrain matrix raster.
 

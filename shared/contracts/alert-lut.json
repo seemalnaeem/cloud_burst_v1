@@ -1,5 +1,5 @@
 {
-  "$comment": "Lookup table reconciling the district names PMD writes in RAIN-WIND press releases with the canonical names in districts.json. Matching is primarily direct (a canonical name found as a whole phrase in the release text); this table only covers the exceptions: spelling variants, abbreviations, a locality named for its district, and single tokens PMD uses for a group of districts (Dir, Chitral, Kohistan, Waziristan). Keys are normalised (lower case, punctuation to spaces, collapsed), so 'D.I Khan' and 'DI Khan' both arrive as 'd i khan' / 'di khan'. Values are canonical names in districts.json. stoplist holds region and locality words that are not districts, so a future alias cannot accidentally map one.",
+  "$comment": "Lookup table reconciling the district names PMD writes in RAIN-WIND press releases with the canonical names in districts.json. Matching is primarily direct (a canonical name found as a whole phrase in the release text); this table only covers the exceptions: spelling variants, abbreviations, and a locality or town named for the district that carries it (so its parent district is flagged). Keys are normalised (lower case, punctuation to spaces, collapsed), so 'D.I Khan' and 'DI Khan' both arrive as 'd i khan' / 'di khan'. Values are canonical names in districts.json. A district is flagged only when PMD names it (directly or via one of these aliases), so the vulnerable set matches the press release exactly. Region umbrella words PMD sometimes uses for a group (Dir, Chitral, Kohistan, Waziristan) are deliberately NOT expanded to their split districts: PMD does not name those districts individually, so they are left unflagged rather than guessed. stoplist holds region and locality words that are not districts, so a future alias cannot accidentally map one.",
   "aliases": {
     "neelum valley": ["Neelam Valley"],
     "neelum": ["Neelam Valley"],
@@ -10,10 +10,6 @@
     "di khan": ["Dera Ismail Khan"],
     "d g khan": ["Dera Ghazi Khan"],
     "dg khan": ["Dera Ghazi Khan"],
-    "dir": ["Upper Dir", "Lower Dir"],
-    "chitral": ["Chitral Upper", "Chitral Lower"],
-    "kohistan": ["Upper Kohistan", "Lower Kohistan", "Kolai Palas"],
-    "waziristan": ["North Waziristan", "South Waziristan"],
     "umerkot": ["Umer Kot"],
     "umer kot": ["Umer Kot"],
     "talagang": ["Chakwal"],
@@ -21,5 +17,5 @@
     "noorpur thal": ["Khushab"],
     "noorpurthal": ["Khushab"]
   },
-  "stoplist": ["murree", "galiyat", "galliyat", "pothohar", "potohar", "kashmir", "punjab", "sindh", "balochistan", "gilgit baltistan", "khyber pakhtunkhwa"]
+  "stoplist": ["murree", "galiyat", "galliyat", "pothohar", "potohar", "kashmir", "punjab", "sindh", "balochistan", "gilgit baltistan", "khyber pakhtunkhwa", "dir", "chitral", "kohistan", "waziristan"]
 }

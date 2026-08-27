@@ -977,6 +977,8 @@ export default function App () {
               cari={alertCari}
               configured={alertConfigured}
               error={alertError}
+              provincesOn={alertProvincesOn}
+              onStepAlert={stepAlert}
             />
           </div>
         )}
@@ -1004,7 +1006,6 @@ export default function App () {
                 alertProvinces={alertProvinces}
                 alertProvincesOn={alertProvincesOn}
                 onToggleAlertProvince={toggleAlertProvince}
-                onStepAlert={stepAlert}
                 alertConfigured={alertConfigured}
                 alertError={alertError}
                 alertStale={alertStale}

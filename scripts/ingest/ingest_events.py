@@ -47,6 +47,18 @@ COL = {
     "elevation": 10, "slope": 11,
 }
 
+# Corrected coordinates for source rows whose delivered lat/lon is wrong, keyed by
+# sr_no and given as (lat, lon). The Chakwal event (sr_no 7) was delivered at
+# 32.6583, 72.4743, which sits in a Khushab salient just south of the Chakwal
+# border, so it drew inside Khushab and the spatial overlay labelled it Khushab.
+# It is nudged the short distance north into Chakwal it should have carried. This
+# lives here, not as a one-off UPDATE, so a re-ingest from the CSV keeps the fix
+# rather than restoring the bad point. district_name is re-derived from the
+# corrected point downstream, so it is not repeated here.
+COORD_CORRECTIONS: dict[int, tuple[float, float]] = {
+    7: (32.680429, 72.477113),
+}
+
 _ORD = re.compile(r"(\d+)(st|nd|rd|th)", re.IGNORECASE)
 
 
@@ -193,6 +205,11 @@ async def main() -> None:
             lat = to_float(cell("lat"))
             if location == "" or lon is None or lat is None:
                 continue
+
+            # Override a delivered coordinate known to be wrong, before it drives
+            # both the geometry and the district overlay.
+            if sr_no in COORD_CORRECTIONS:
+                lat, lon = COORD_CORRECTIONS[sr_no]
 
             district = await district_for(conn, lon, lat)
             if district is None:

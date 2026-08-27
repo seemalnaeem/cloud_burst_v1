@@ -366,7 +366,10 @@ export default function App () {
   const alertDistrictCodes = useMemo(() => {
     const codes = []
     for (const p of alertProvinces) {
-      if (alertProvincesOn.has(p.province)) for (const d of p.districts) codes.push(d.code)
+      // An advisory entry with no code is a region umbrella (Dir) or a locality
+      // that is not its own district (Murree): it counts in the panel but lights
+      // no polygon, so skip it here.
+      if (alertProvincesOn.has(p.province)) for (const d of p.districts) if (d.code) codes.push(d.code)
     }
     return codes
   }, [alertProvinces, alertProvincesOn])

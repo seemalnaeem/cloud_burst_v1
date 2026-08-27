@@ -15,7 +15,8 @@
     "talagang": ["Chakwal"],
     "wazirabad": ["Gujranwala"],
     "noorpur thal": ["Khushab"],
-    "noorpurthal": ["Khushab"]
+    "noorpurthal": ["Khushab"],
+    "noorpur": ["Khushab"]
   },
   "stoplist": ["murree", "galiyat", "galliyat", "pothohar", "potohar", "kashmir", "punjab", "sindh", "balochistan", "gilgit baltistan", "khyber pakhtunkhwa", "dir", "chitral", "kohistan", "waziristan"]
 }

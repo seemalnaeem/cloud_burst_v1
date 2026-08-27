@@ -98,10 +98,10 @@ const SECTION_HEADINGS = [
   { re: /Sindh\s*&\s*Balochistan\s*:/i, provinces: ['Sindh', 'Balochistan'] }
 ]
 
-// The real sentence the release writes for each region, keyed by DB province. Each
-// section runs from its heading to the next heading, or to the "Possible Impacts"
-// block that closes the regional forecast.
-export function sectionTexts (body) {
+// The region slices in document order: each heading's forecast text and the DB
+// provinces it covers. Both the per-province prose and the per-region place lists
+// derive from these, so the two can never disagree about where a region ends.
+export function sectionSlices (body) {
   const marks = []
   for (const h of SECTION_HEADINGS) {
     const m = body.match(h.re)
@@ -110,40 +110,92 @@ export function sectionTexts (body) {
   marks.sort((a, b) => a.start - b.start)
   const impacts = body.search(/Possible\s+Impacts/i)
   const endAll = impacts >= 0 ? impacts : body.length
+  return marks.map((mk, i) => ({
+    provinces: mk.provinces,
+    text: body.slice(mk.headEnd, i + 1 < marks.length ? marks[i + 1].start : endAll).replace(/^[\s:.\-]+/, '').trim()
+  }))
+}
+
+// The real sentence the release writes for each region, keyed by DB province.
+export function sectionTexts (body) {
   const out = {}
-  marks.forEach((mk, i) => {
-    const end = i + 1 < marks.length ? marks[i + 1].start : endAll
-    const text = body.slice(mk.headEnd, end).replace(/^[\s:.\-]+/, '').trim()
-    for (const p of mk.provinces) if (!out[p]) out[p] = text
-  })
+  for (const s of sectionSlices(body)) for (const p of s.provinces) if (!out[p]) out[p] = s.text
   return out
 }
 
-// The full advisory payload the gateway returns: the release meta, the matched
-// districts bucketed by province with the region's real advisory text, and a code
-// -> {name, province} index the client uses to decide which clicked district is
-// under alert and what to show.
+// Fragments that are date, weather or boilerplate rather than a place, so an
+// overshoot in the capture never adds a fake entry to the count. Matched only as
+// whole words: a bare substring rule would eat real districts (Mardan and Lakki
+// Marwat both contain "mar", the March abbreviation).
+const NOT_A_PLACE = /\d|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december|night|evening|morning|weekend|gaps?|isolated|heavyfalls?|thundershowers?|thunderstorms?|rain|wind|weather|expected|during|period)\b/i
+
+// The place names a region sentence lists, verbatim and in document order. PMD
+// writes "... expected in (A, B, C) from <date>" and sometimes a second "while in
+// D, E on <date>"; take every comma or "and" separated name inside those "in ..."
+// clauses, up to the date or gap wording that closes each list. This is the count
+// the panel shows, so it mirrors exactly what PMD names, no more and no fewer.
+export function extractNames (sectionText) {
+  const out = []
+  const seen = new Set()
+  const re = /(?:expected in|while in)\s*\(?\s*([\s\S]*?)(?=\)|\bfrom\b|\bon\b|\bduring\b|\bwith\s+occasional\b|$)/gi
+  for (const m of sectionText.matchAll(re)) {
+    for (const raw of m[1].split(/\s*,\s*|\s+and\s+/i)) {
+      const name = raw.replace(/[()]/g, '').replace(/\s+/g, ' ').trim()
+      if (name.length < 2 || NOT_A_PLACE.test(name)) continue
+      const k = name.toLowerCase()
+      if (seen.has(k)) continue
+      seen.add(k)
+      out.push(name)
+    }
+  }
+  return out
+}
+
+// The DB district a PMD place name flags on the map, or null when it is a region
+// umbrella (Dir, Kohistan) or a locality that is not a district (Murree): those
+// are still listed and counted, they just do not light a polygon. Canonical match
+// first, then the alias table (spellings, abbreviations, a town to its parent).
+function resolveName (name, byName, aliases, stop) {
+  const p = norm(name)
+  if (stop.has(p)) return null
+  const direct = byName.get(p)
+  if (direct) return direct
+  const targets = aliases[p]
+  if (targets && targets.length) return byName.get(norm(targets[0])) || null
+  return null
+}
+
+// The full advisory payload the gateway returns. Each province carries the places
+// PMD named for its region, verbatim and in order, so the count matches the press
+// release exactly; each entry keeps the DB district `code` it resolves to (or null
+// for an umbrella or non-district name) for the map overlay, and byCode indexes the
+// resolved codes so a clicked flashing district knows what to show.
 export function buildAdvisory ({ listHtml, detailHtml, detailUrl, id }, districts, lut) {
   const fullText = stripTags(detailHtml)
   const body = sliceBody(fullText)
-  // Match on the sliced body, not the whole page, so the nav and the list of
-  // other releases can never contribute a stray district.
-  const matched = matchDistricts(body, districts, lut)
+
+  const byName = new Map(districts.map((d) => [norm(d.name), d]))
+  const aliases = lut.aliases ?? {}
+  const stop = new Set((lut.stoplist ?? []).map(norm))
 
   const byProvince = new Map()
   const byCode = {}
-  for (const d of matched) {
-    if (!byProvince.has(d.province)) byProvince.set(d.province, [])
-    byProvince.get(d.province).push({ code: d.code, name: d.name })
-    byCode[d.code] = { name: d.name, province: d.province }
+  for (const s of sectionSlices(body)) {
+    // Names that do not resolve fall to the region's broader province (the last in
+    // its list): Islamabad/Upper Punjab -> Punjab, Sindh & Balochistan -> Balochistan.
+    const fallback = s.provinces[s.provinces.length - 1]
+    for (const name of extractNames(s.text)) {
+      const d = resolveName(name, byName, aliases, stop)
+      const province = d && s.provinces.includes(d.province) ? d.province : fallback
+      if (!byProvince.has(province)) byProvince.set(province, [])
+      byProvince.get(province).push({ name, code: d ? d.code : null })
+      if (d) byCode[d.code] = { name: d.name, province: d.province }
+    }
   }
+
   const texts = sectionTexts(body)
   const provinces = [...byProvince.entries()]
-    .map(([province, ds]) => ({
-      province,
-      text: texts[province] || '',
-      districts: ds.sort((a, b) => a.name.localeCompare(b.name))
-    }))
+    .map(([province, list]) => ({ province, text: texts[province] || '', districts: list }))
     .sort((a, b) => a.province.localeCompare(b.province))
 
   const { title, date } = releaseFromList(listHtml, id)

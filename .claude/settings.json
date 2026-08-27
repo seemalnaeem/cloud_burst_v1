@@ -55,7 +55,17 @@
       "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('stale:',d.get\\('stale'\\),'ageHours:',d.get\\('ageHours'\\)\\)\")",
       "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('stale:',d.get\\('stale'\\),'path:',bool\\(d.get\\('path'\\)\\)\\)\")",
       "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('release:',bool\\(d.get\\('release'\\)\\),'stale:',d.get\\('stale'\\)\\)\")",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:4090/)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:4090/)",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T cbd-db psql -U cbd_user -d cari -tA -c \"SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='obs' AND table_name='events' ORDER BY ordinal_position;\")",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T cbd-db psql -U cbd_user -d cari -c \"SELECT id, location_name, occurrence, ST_X\\(geom\\) AS lng, ST_Y\\(geom\\) AS lat, ST_AsText\\(geom\\) AS wkt FROM obs.events WHERE location_name ILIKE '%chakwal%';\")",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T cbd-db psql -U cbd_user -d cari -tA -c \"SELECT id, location_name, district_name FROM obs.events WHERE id=7;\")",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T cbd-db psql -U cbd_user -d cari -tA -c \"SELECT d.district_name, d.province FROM geo.districts d, obs.events e WHERE e.id=7 AND ST_Contains\\(d.geom, e.geom\\);\")",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T cbd-db psql -U cbd_user -d cari -tA -c \"SELECT district_name, ST_Y\\(ST_Centroid\\(geom\\)\\) AS clat, ST_X\\(ST_Centroid\\(geom\\)\\) AS clng, ST_AsText\\(ST_Extent\\(geom\\)\\) FROM geo.districts WHERE district_name ILIKE 'chakwal' GROUP BY district_name, geom;\")",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T cbd-db psql -U cbd_user -d cari -tA -c \"SELECT id, sr_no, source_id, photo_folder FROM obs.events WHERE id=7;\")",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T cbd-db psql -U cbd_user -d cari -tA)",
+      "Bash(curl -s \"http://localhost:3090/api/events/7\")",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('district:',d.get\\('district'\\) or d.get\\('districtName'\\) or d.get\\('district_name'\\),'| lat/lng:',d.get\\('lat'\\),d.get\\('lng'\\) or d.get\\('lon'\\)\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts/ingest/ingest_events.py'\\).read\\(\\)\\); print\\('syntax OK \\(host\\)'\\)\")"
     ],
     "deny": [
       "Read(./.env)",

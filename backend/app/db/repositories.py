@@ -20,6 +20,21 @@ def _max_stale_hours() -> int:
     return int(contracts.load("resilience")["maxStaleHours"])
 
 
+# Models whose cycle is a fixed reference rather than a daily forecast, so the
+# freshness cap must not hide them. GFS wind and vertical velocity are a single
+# climatological cycle (dated 2023) used as a CARI scoring input; capping it by age
+# would leave every district unscored for want of "a GFS cycle".
+_CAP_EXEMPT_MODELS = frozenset({"GFS"})
+
+
+def _cap_clause(model: str | None, cap: int, prefix: str = "") -> str:
+    """The age-cap SQL for a cycle query, or 'true' when the model is cap exempt.
+    prefix qualifies the column when the query aliases wx.cycles (e.g. 'cy.')."""
+    if model in _CAP_EXEMPT_MODELS:
+        return "true"
+    return f"{prefix}creation_time >= now() - make_interval(hours => {cap})"
+
+
 async def list_districts(province: str | None = None) -> list[dict[str, Any]]:
     if province:
         rows = await pool.fetch(
@@ -372,12 +387,13 @@ async def latest_cycle(model: str | None = None) -> dict[str, Any] | None:
     where_model = "AND model = $1" if model else ""
     args = [model] if model else []
     # ORDER BY complete first so a complete cycle wins over a newer partial one,
-    # then by time; the cap keeps a very old run from standing in silently.
+    # then by time; the cap keeps a very old run from standing in silently, except
+    # for a cap-exempt reference model (GFS) whose only cycle is deliberately old.
     row = await pool.fetchrow(
         f"""
         SELECT creation_time, model, published_leads, complete
         FROM wx.cycles
-        WHERE creation_time >= now() - make_interval(hours => {cap}) {where_model}
+        WHERE {_cap_clause(model, cap)} {where_model}
         ORDER BY complete DESC, creation_time DESC
         LIMIT 1
         """,
@@ -413,7 +429,7 @@ async def cycle_for_band(band_key: str, model: str | None, lead_hours: int | Non
         FROM wx.raster_catalog rc
         JOIN wx.cycles cy ON cy.model = rc.model AND cy.creation_time = rc.creation_time
         WHERE rc.band_key = $1 AND rc.model = $2 AND rc.lead_hours = $3
-          AND rc.creation_time >= now() - make_interval(hours => {cap})
+          AND {_cap_clause(model, cap, prefix="rc.")}
         ORDER BY cy.complete DESC, rc.creation_time DESC
         LIMIT 1
         """,
@@ -443,13 +459,15 @@ async def forecast_models() -> list[dict[str, Any]]:
     a half-written run's. The panel offers exactly these models.
     """
     cap = _max_stale_hours()
+    exempt = list(_CAP_EXEMPT_MODELS)
     rows = await pool.fetch(
         f"""
         SELECT DISTINCT ON (model) model, creation_time, published_leads, complete, discovered_at
         FROM wx.cycles
-        WHERE creation_time >= now() - make_interval(hours => {cap})
+        WHERE creation_time >= now() - make_interval(hours => {cap}) OR model = ANY($1::text[])
         ORDER BY model, complete DESC, creation_time DESC
-        """
+        """,
+        exempt,
     )
     return [dict(r) for r in rows]
 

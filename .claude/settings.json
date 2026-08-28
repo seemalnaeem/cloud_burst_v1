@@ -65,7 +65,22 @@
       "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T cbd-db psql -U cbd_user -d cari -tA)",
       "Bash(curl -s \"http://localhost:3090/api/events/7\")",
       "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('district:',d.get\\('district'\\) or d.get\\('districtName'\\) or d.get\\('district_name'\\),'| lat/lng:',d.get\\('lat'\\),d.get\\('lng'\\) or d.get\\('lon'\\)\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts/ingest/ingest_events.py'\\).read\\(\\)\\); print\\('syntax OK \\(host\\)'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts/ingest/ingest_events.py'\\).read\\(\\)\\); print\\('syntax OK \\(host\\)'\\)\")",
+      "Bash(python)",
+      "Bash(curl -s http://localhost:3090/api/upstream/advisories -o __TRACKED_VAR__/adv.json)",
+      "Bash(python \"C:/Users/USER/AppData/Local/Temp/claude/d--muhammad-arsalan-seemal-cloud-burst-dev/6bb54ae3-31bd-4d00-9a00-77fd9415beeb/scratchpad/adv_report.py\")",
+      "Bash(curl -sk -A 'Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\)' https://weather.gov.pk/nwfc/all-press-releases/38?type=RAIN-WIND -o __TRACKED_VAR__/rel38.html --max-time 40)",
+      "Bash(python \"C:/Users/USER/AppData/Local/Temp/claude/d--muhammad-arsalan-seemal-cloud-burst-dev/6bb54ae3-31bd-4d00-9a00-77fd9415beeb/scratchpad/extract_rel.py\")",
+      "Bash(curl -s http://localhost:3090/api/upstream/advisories -o __TRACKED_VAR__/adv2.json)",
+      "Bash(python __TRACKED_VAR__/adv_report.py)",
+      "Bash(python \"C:/Users/USER/AppData/Local/Temp/claude/d--muhammad-arsalan-seemal-cloud-burst-dev/6bb54ae3-31bd-4d00-9a00-77fd9415beeb/scratchpad/crosscheck.py\")",
+      "Bash(curl -s http://localhost:3090/api/upstream/advisories -o __TRACKED_VAR__/adv3.json)",
+      "Bash(python - __TRACKED_VAR__/adv3.json)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"http://localhost:3090/api/upstream/advisories\")",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T cbd-db psql -U cbd_user -d cari -tA -c \"SELECT model, creation_time, complete, now\\(\\)-creation_time AS age FROM wx.cycles WHERE model IN \\('GFS'\\) ORDER BY creation_time DESC;\")",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T cbd-db psql -U cbd_user -d cari -tA -c \"SELECT band_key, creation_time, count\\(*\\) FROM wx.raster_catalog WHERE model='GFS' GROUP BY band_key, creation_time ORDER BY band_key;\")",
+      "Bash(curl -s \"http://localhost:3090/api/score/cari?district=Lahore&forecast_hours=0\")",
+      "Bash(curl -s \"http://localhost:3090/api/score/cari/choropleth?kind=district&forecast_hours=0\")"
     ],
     "deny": [
       "Read(./.env)",

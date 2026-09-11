@@ -316,6 +316,18 @@
       "legendTitle": "Temperature 850hPa (C)"
     },
     {
+      "key": "pmd_prs",
+      "sourceScale": 0.1,
+      "label": "Surface Pressure",
+      "unit": "hPa",
+      "category": "dynamics",
+      "temporal": true,
+      "min": 500, "max": 1025,
+      "palette": "continuous",
+      "legendTitle": "Surface Pressure (hPa)",
+      "$comment": "Station (surface) pressure, element PRS level 0 from the PMD portal, temporal like the other forecast bands. Served by GRAPES, WRFPRS and GDFS; ICON and D1D do not carry it. The Int16 feeds (GRAPES, GDFS) encode tenths of a hPa, so sourceScale 0.1 applies to them; the WRFPRS Float32 feed is already in hPa and passes through untouched, exactly as the temperature and humidity bands do. The range spans the country's elevation: near 1010 hPa on the plains and coast down past 550 hPa over the northern mountains, so the highest peaks saturate the low end by design."
+    },
+    {
       "$gfsWindComment": "GFS u and v wind components at 850 hPa, kept internal. They are not map layers; they exist so the wind-field endpoint can recover direction for the barb overlay, which needs the vectors, not just the wind_speed_pl850 magnitude. Ingested by scripts/ingest/ingest_gfs.py under model GFS.",
       "key": "wind_u_pl850",
       "label": "Wind U 850 hPa",

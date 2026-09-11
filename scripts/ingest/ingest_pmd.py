@@ -14,16 +14,19 @@ every raster layer with source "pmd" names its model (the PMD data_type), its
 element, its level and the band it lands in. So adding a layer is a contract
 edit and this script follows. The plan today, probed against the portal:
 
-    GRAPES  (CMA-GFS)    CAPE PWAT DPT RHU(sfc/700/500) TEM(sfc/850) TPE HOURTPE
-    WRFPRS  (PMD-WRF)    CAPE DPT TEM(sfc/850) TPE HOURTPE RHU(700/500)
+    GRAPES  (CMA-GFS)    CAPE PWAT DPT RHU(sfc/700/500) TEM(sfc/850) TPE HOURTPE PRS
+    WRFPRS  (PMD-WRF)    CAPE DPT TEM(sfc/850) TPE HOURTPE RHU(700/500) PRS
     ICON    (PMD-ICON)   CAPE DPT RHU TEM TPE HOURTPE   (surface only for this run)
     D1D     (ECMWF-IFS)  TEM(sfc/850) RHU(700/500) HOURTPE
+    GDFS    (CMA-GOWFS)  HOURTPE TEM RHU PRS
 
 The pressure levels RHU 700/500 and TEM 850 are the CARI inputs the surface-only
 feed lacked; they are fetched by passing the level parameter to
-getModelForecastLatest. Wind and vertical velocity are still absent as grids:
-the portal serves those only as geobuf contour vectors under the GPH element,
-not as rasters, so they are not ingested here.
+getModelForecastLatest. PRS is surface pressure, a surface field like the rest
+and temporal per cycle and lead; only GRAPES, WRFPRS and GDFS serve it, ICON and
+D1D return nothing for it and so carry no PRS layer. Wind and vertical velocity
+are still absent as grids: the portal serves those only as geobuf contour vectors
+under the GPH element, not as rasters, so they are not ingested here.
 
 Per field per lead: download the tiff, clip to the national boundary, convert to
 a COG, catalogue it against the model, cycle and lead. Each model's cycle goes in

@@ -614,6 +614,30 @@
       }
     },
     {
+      "id": "grapes_prs",
+      "label": "Surface Pressure",
+      "source": "pmd",
+      "model": "GRAPES",
+      "modelId": "grapes",
+      "modelLabel": "CMA-GFS",
+      "modelFull": "CMA GRAPES Global",
+      "element": "PRS",
+      "level": 0,
+      "levelLabel": "Surface",
+      "band": "pmd_prs",
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "continuous",
+      "color": "#475569",
+      "opacity": 0.72,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Surface pressure, from CMA-GFS"
+      }
+    },
+    {
       "id": "wrfprs_cape",
       "label": "CAPE",
       "source": "pmd",
@@ -803,6 +827,30 @@
         "geometry": "raster",
         "render": "steps",
         "description": "Relative humidity, 500 hpa, from PMD-WRF"
+      }
+    },
+    {
+      "id": "wrfprs_prs",
+      "label": "Surface Pressure",
+      "source": "pmd",
+      "model": "WRFPRS",
+      "modelId": "wrfprs",
+      "modelLabel": "PMD-WRF",
+      "modelFull": "PMD WRF",
+      "element": "PRS",
+      "level": 0,
+      "levelLabel": "Surface",
+      "band": "pmd_prs",
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "continuous",
+      "color": "#475569",
+      "opacity": 0.72,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Surface pressure, from PMD-WRF"
       }
     },
     {
@@ -1139,6 +1187,30 @@
         "geometry": "raster",
         "render": "steps",
         "description": "Relative humidity, surface, from CMA-GOWFS"
+      }
+    },
+    {
+      "id": "gowfs_prs",
+      "label": "Surface Pressure",
+      "source": "pmd",
+      "model": "GDFS",
+      "modelId": "gowfs",
+      "modelLabel": "CMA-GOWFS",
+      "modelFull": "CMA GOWFS Global (GDFS)",
+      "element": "PRS",
+      "level": 0,
+      "levelLabel": "Surface",
+      "band": "pmd_prs",
+      "temporal": true,
+      "requiresCycle": true,
+      "palette": "continuous",
+      "color": "#475569",
+      "opacity": 0.72,
+      "defaultVisible": false,
+      "legend": {
+        "geometry": "raster",
+        "render": "steps",
+        "description": "Surface pressure, from CMA-GOWFS"
       }
     },
     {

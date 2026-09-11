@@ -85,6 +85,30 @@ async def cari_choropleth(
     return await score_service.cari_choropleth(kind, forecast_hours, matrix)
 
 
+@router.get("/cari/extreme-events")
+async def cari_extreme_events(
+    kind: Literal["district", "tehsil"] = Query(
+        "district", description="Which layer to flag extreme regions for"
+    ),
+    day: int | None = Query(
+        None, ge=0,
+        description=(
+            "Zero-based index into the returned days list. Omit to fetch just the "
+            "list of upcoming forecast days so the dropdown can populate."
+        ),
+    ),
+) -> dict:
+    """Daily 'Extreme Events' for a layer, for the Convective Alerts panel.
+
+    With no day, returns the upcoming forecast days. With a day, returns the peak
+    CARI class per feature across that PKT day, gated by the day's accumulated
+    rainfall, and which regions are extreme (class at or above the contract
+    minClassIdx). Cached per cycle and day; a cold day reports "computing" and is
+    polled until ready, like the choropleth.
+    """
+    return await score_service.extreme_events(kind, day)
+
+
 @router.get("/cari/warm")
 async def cari_warm(
     kind: Literal["district", "tehsil"] = Query(

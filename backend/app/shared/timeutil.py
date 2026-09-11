@@ -156,3 +156,51 @@ def alert_target(latest_creation_time: datetime, published_leads: list[int]) -> 
     delta_h = (target - latest_creation_time.astimezone(PKT)).total_seconds() / 3600.0
     lead = snap_to_published(snap_to_grid(int(round(delta_h))), published_leads)
     return tomorrow, lead
+
+
+def forecast_days(
+    latest_creation_time: datetime,
+    published_leads: list[int],
+    max_days: int,
+) -> list[dict]:
+    """Upcoming PKT forecast days and the published leads that fall in each.
+
+    A day is a PKT calendar day, local midnight to midnight. start_lead and
+    end_lead are the lead hours from the cycle to those PKT boundaries, and leads
+    are the published leads in (start_lead, end_lead]. Days the cycle does not
+    reach are skipped, so the list only ever offers days there is data for; a
+    partly covered final day (the cycle ends mid-day) is still offered with the
+    leads it does have. Days start at today, since a forecast still has hours of
+    the current day left to run.
+    """
+    if not published_leads or max_days <= 0:
+        return []
+
+    creation_pkt = latest_creation_time.astimezone(PKT)
+    today = pkt_now().date()
+    ordered = sorted(published_leads)
+    max_lead = ordered[-1]
+
+    out: list[dict] = []
+    offset = 0
+    while len(out) < max_days and offset <= max_days + 4:
+        day_date = today + timedelta(days=offset)
+        offset += 1
+        day_start = datetime.combine(day_date, datetime.min.time(), tzinfo=PKT)
+        start_lead = int(round((day_start - creation_pkt).total_seconds() / 3600.0))
+        if start_lead > max_lead:
+            break
+        end_lead = start_lead + 24
+        leads = [lead for lead in ordered if start_lead < lead <= end_lead]
+        if not leads:
+            continue
+        out.append(
+            {
+                "index": len(out),
+                "date": day_date.isoformat(),
+                "start_lead": start_lead,
+                "end_lead": end_lead,
+                "leads": leads,
+            }
+        )
+    return out

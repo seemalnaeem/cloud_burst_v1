@@ -274,6 +274,7 @@ export function applyLayerOrder (map, orderedDefsTopFirst) {
   // The high-alert outline rides above even the selection outlines, so a
   // reordering of the boundaries never buries the flashing districts.
   if (map.getLayer(ALERT_OUTLINE_ID)) map.moveLayer(ALERT_OUTLINE_ID)
+  if (map.getLayer(EXTREME_OUTLINE_ID)) map.moveLayer(EXTREME_OUTLINE_ID)
 }
 
 // ------------------------------------------------------- high-alert outline
@@ -310,6 +311,39 @@ export function setAlertOutline (map, def, codes) {
   // A high alert must not be buried under the fill or another boundary, so it is
   // lifted to the very top every time it is (re)applied.
   map.moveLayer(ALERT_OUTLINE_ID)
+}
+
+// ------------------------------------------------------- extreme events outline
+//
+// The pulsing outline over the districts or tehsils that are extreme for a chosen
+// forecast day (the Extreme Events control). It is the same idea as the advisory
+// outline but on whichever CARI layer is active, so it takes the join field
+// explicitly: district_name for districts, tehsil_code for tehsils. The active
+// layer can switch, changing the source-layer, so it rebuilds rather than only
+// refiltering. The pulse is driven from MapView, like the alert outline.
+export const EXTREME_OUTLINE_ID = 'extreme-outline'
+
+export function setExtremeOutline (map, def, keys, keyField) {
+  if (!map || !map.getStyle()) return
+  const exists = map.getLayer(EXTREME_OUTLINE_ID)
+  if (!def || !keyField || !keys || keys.length === 0) {
+    if (exists) map.removeLayer(EXTREME_OUTLINE_ID)
+    return
+  }
+  if (!map.getSource(sourceId(def.id))) return
+  // Rebuild every time: the active layer (and thus source, source-layer and join
+  // field) can change between calls, which a bare setFilter would not follow.
+  if (exists) map.removeLayer(EXTREME_OUTLINE_ID)
+  map.addLayer({
+    id: EXTREME_OUTLINE_ID,
+    type: 'line',
+    source: sourceId(def.id),
+    'source-layer': def.sourceLayer,
+    filter: ['in', ['get', keyField], ['literal', keys]],
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': ALERT_COLOR, 'line-width': 2.2, 'line-opacity': 0.9, 'line-blur': 0.3 }
+  })
+  map.moveLayer(EXTREME_OUTLINE_ID)
 }
 
 export const rasterId = (layerId) => `raster-${layerId}`

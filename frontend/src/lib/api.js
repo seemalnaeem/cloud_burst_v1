@@ -141,6 +141,15 @@ export const getCariAll = (forecastHours, matrix, signal) =>
 // runs; the caller polls until ready. kind is "district" or "tehsil".
 export const getCariChoropleth = (kind, forecastHours, signal) =>
   api.get('/api/score/cari/choropleth', { kind, forecast_hours: forecastHours }, { signal })
+// The daily "Extreme Events" view for the Convective Alerts panel. With no day,
+// returns just the upcoming forecast days so the dropdown can populate; with a
+// day index, returns the per-feature day class and which regions are extreme.
+export const getExtremeEvents = (kind, day, signal) =>
+  api.get(
+    '/api/score/cari/extreme-events',
+    day === null || day === undefined ? { kind } : { kind, day },
+    { signal }
+  )
 // Warm a whole layer's timeline so every slider position is a cache hit. Reports
 // { total, ready, leads } and keeps a background pass filling the rest; poll it.
 export const warmTimeline = (kind, signal) =>

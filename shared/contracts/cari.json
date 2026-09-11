@@ -530,6 +530,13 @@
     "thresholdMmHr": 1.0,
     "capClassIdx": 1
   },
+  "extremeEvents": {
+    "$comment": "Daily 'Extreme Events' view in the Convective Alerts panel. For a chosen PKT forecast day, take the peak CARI class across the day's scoring leads, then require the day's ACCUMULATED rainfall (mm, from the multi-model accumulation ensemble) to reach dailyThresholdMm or the region is capped to Low, the same foundation as precipitationGate but at a daily scale. A region counts as extreme, and flashes on the map, at class index >= minClassIdx. maxDays caps how many upcoming days the dropdown offers. Set enabled false to hide the feature.",
+    "enabled": true,
+    "dailyThresholdMm": 10.0,
+    "minClassIdx": 4,
+    "maxDays": 3
+  },
   "alerts": {
     "$comment": "Districts at or above this class index enter the alert feed.",
     "minClassIdx": 4,

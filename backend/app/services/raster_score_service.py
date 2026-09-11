@@ -374,6 +374,43 @@ async def _generate_ensemble_accum(window: int, creation_time, lead: int) -> Non
     logger.info("ensemble_accum_generated", window=window, lead=lead, models=used, path=str(dst))
 
 
+async def daily_accumulation(creation_time, start_lead: int, end_lead: int) -> Path | None:
+    """Ensemble precipitation total (mm) over a day window (start_lead, end_lead].
+
+    The daily counterpart of _generate_ensemble_accum: it reuses the same per model
+    window accumulation and per pixel mean, but for a day aligned window, and writes
+    an uncatalogued temporary COG whose path is returned for zonal reduction rather
+    than cataloguing it as a servable layer. window is the day length ending at
+    end_lead, so the accumulation spans exactly (start_lead, end_lead]. Lead offsets
+    are read in each model's own lead space, the same convention the ensemble raster
+    already uses. Returns None if no model covers the window; the caller is
+    responsible for deleting the returned file when done.
+    """
+    window = end_lead - start_lead
+    if window <= 0:
+        return None
+
+    grid = await _grid_for(creation_time, start_lead)
+    tmp = settings.tmp_dir / f"daily_accum_{start_lead:03d}_{end_lead:03d}"
+
+    totals: list[np.ndarray] = []
+    for model in _ENSEMBLE_PRECIP_MODELS:
+        total = await _model_accumulation(model, window, end_lead, grid, tmp)
+        if total is not None:
+            totals.append(total)
+    if not totals:
+        return None
+
+    stack = np.stack(totals, axis=0)
+    count = (~np.isnan(stack)).sum(axis=0)
+    summed = np.nansum(stack, axis=0)
+    mean = np.where(count > 0, summed / np.maximum(count, 1), np.float32(-9999.0)).astype("float32")
+
+    dst = settings.tmp_dir / f"daily_accum_{creation_time.strftime('%Y%m%d%H')}_{start_lead:03d}_{end_lead:03d}.tif"
+    await asyncio.to_thread(_write_cog, mean, grid, dst, dtype="float32", nodata=-9999.0)
+    return dst
+
+
 def _accum_generator(window: int):
     async def gen(creation_time, lead: int) -> None:
         await _generate_ensemble_accum(window, creation_time, lead)

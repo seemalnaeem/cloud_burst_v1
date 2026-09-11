@@ -25,6 +25,7 @@ import MapView from '@/features/map/MapView'
 import { useCariChoropleth } from '@/hooks/useCariChoropleth'
 import { useWarmTimeline } from '@/hooks/useWarmTimeline'
 import { useAdvisories } from '@/hooks/useAdvisories'
+import { useExtremeEvents } from '@/hooks/useExtremeEvents'
 import { useIngestStatus } from '@/hooks/useIngestStatus'
 import { useRadarFrames } from '@/hooks/useRadarFrames'
 import { useContracts } from '@/hooks/useContracts'
@@ -397,6 +398,18 @@ export default function App () {
     return codes
   }, [alertProvinces, alertProvincesOn])
 
+  // Master switch for the advisory alert flashing, so it can be turned off to read
+  // the Extreme Events flash on its own. It only gates the existing province-driven
+  // flashing: on, the districts flash as the stepper and layer panel dictate; off,
+  // no advisory district flashes regardless. It never changes which provinces are
+  // selected, so the two selection paths keep their meaning.
+  const [alertsFlashOn, setAlertsFlashOn] = useState(true)
+  const toggleAlertsFlash = useCallback(() => setAlertsFlashOn((v) => !v), [])
+  const shownAlertCodes = useMemo(
+    () => (analysis && alertsFlashOn ? alertDistrictCodes : NO_ALERT_CODES),
+    [analysis, alertsFlashOn, alertDistrictCodes]
+  )
+
   // The PMD advisory has no per-district prose, only one sentence per region, so
   // each alert card carries that district's own CARI instead as its distinct
   // signal. Scored for the same lead the Analysis timeline shows, keyed by the
@@ -416,6 +429,39 @@ export default function App () {
     }
     return out
   }, [alertCariData, cariClassList])
+
+  // Extreme Events: the daily-accumulated-precipitation CARI view driven from the
+  // alerts panel. When on, the active CARI layer's extreme regions for the chosen
+  // forecast day flash on the map, independent of the timeline slider. The kind
+  // follows the visible administrative layer, defaulting to districts.
+  const [extremeMode, setExtremeMode] = useState(false)
+  const [extremeDay, setExtremeDay] = useState(null)
+  const extremeKind = useMemo(() => {
+    if (!analysis || !extremeMode) return null
+    if (activeCariKinds.includes('tehsil') && !activeCariKinds.includes('district')) return 'tehsil'
+    return 'district'
+  }, [analysis, extremeMode, activeCariKinds])
+  const extreme = useExtremeEvents(extremeKind, extremeDay)
+  // On enabling, land on the first available day so a result shows straight away.
+  useEffect(() => {
+    if (extremeMode && extremeDay == null && extreme.days.length) setExtremeDay(extreme.days[0].index)
+  }, [extremeMode, extremeDay, extreme.days])
+  const toggleExtreme = useCallback(() => {
+    setExtremeMode((on) => {
+      if (on) setExtremeDay(null)
+      return !on
+    })
+  }, [])
+  const extremeDef = useMemo(
+    () => (extremeKind ? cariLayerDefs.find((d) => d.kind === extremeKind) : null),
+    [extremeKind, cariLayerDefs]
+  )
+  // The join values to flash, only in the Analysis tab and only while on. A stable
+  // empty array off-state so the map effect does not churn.
+  const extremeKeys = useMemo(
+    () => (analysis && extremeMode ? extreme.extremeKeys : NO_ALERT_CODES),
+    [analysis, extremeMode, extreme.extremeKeys]
+  )
 
   // The shared animation timeline: one grid across the active radar layers, and
   // what each layer paints at each step. Products scan on their own phase and
@@ -911,7 +957,10 @@ export default function App () {
           choropleth={cariChoropleth}
           radarOverlays={radarOverlays}
           radarRingColor={radarRingColor}
-          alertDistrictCodes={analysis ? alertDistrictCodes : NO_ALERT_CODES}
+          alertDistrictCodes={shownAlertCodes}
+          extremeKeys={extremeKeys}
+          extremeLayerId={extremeDef?.id ?? null}
+          extremeKeyField={extremeDef?.keyField ?? null}
           selection={selection}
           layerOrder={layerOrder}
           onIdentify={onIdentify}
@@ -988,6 +1037,15 @@ export default function App () {
               error={alertError}
               provincesOn={alertProvincesOn}
               onStepAlert={stepAlert}
+              alertsFlashOn={alertsFlashOn}
+              onToggleAlertsFlash={toggleAlertsFlash}
+              extremeEnabled={extremeMode}
+              extremeDays={extreme.days}
+              extremeDay={extremeDay}
+              onToggleExtreme={toggleExtreme}
+              onSelectExtremeDay={setExtremeDay}
+              extremeCount={extreme.extremeCount}
+              extremeStatus={extreme.status}
             />
           </div>
         )}

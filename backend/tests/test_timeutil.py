@@ -84,3 +84,29 @@ def test_no_cycle_available_raises():
     latest = datetime(2026, 8, 6, tzinfo=timezone.utc)
     with pytest.raises(ValueError, match="No cycle available"):
         timeutil.resolve_cycle(-24, latest, [latest], [0])
+
+
+def test_forecast_days_lists_covered_pkt_days(monkeypatch):
+    """A 05:00 PKT cycle with hourly leads to 78h, asked on 11 Sep, offers today
+    and the next two days (11, 12, 13 Sept). The days start at today because the
+    forecast still has hours of the current day to run."""
+    monkeypatch.setattr(timeutil, "pkt_now", lambda: datetime(2026, 9, 11, 12, tzinfo=timeutil.PKT))
+    creation = datetime(2026, 9, 10, 0, tzinfo=timezone.utc)  # 05:00 PKT
+    published = list(range(0, 79))
+
+    days = timeutil.forecast_days(creation, published, max_days=3)
+
+    assert [d["date"] for d in days] == ["2026-09-11", "2026-09-12", "2026-09-13"]
+    assert [d["index"] for d in days] == [0, 1, 2]
+    assert days[0]["start_lead"] == 19 and days[0]["end_lead"] == 43
+    assert days[1]["start_lead"] == 43
+    assert days[2]["start_lead"] == 67
+    for d in days:
+        assert d["leads"], "a listed day must carry the leads inside it"
+        assert all(d["start_lead"] < lead <= d["end_lead"] for lead in d["leads"])
+
+
+def test_forecast_days_empty_without_published_leads(monkeypatch):
+    monkeypatch.setattr(timeutil, "pkt_now", lambda: datetime(2026, 9, 11, 12, tzinfo=timeutil.PKT))
+    creation = datetime(2026, 9, 10, 0, tzinfo=timezone.utc)
+    assert timeutil.forecast_days(creation, [], max_days=3) == []

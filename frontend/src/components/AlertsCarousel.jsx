@@ -93,9 +93,13 @@ export default function AlertsCarousel ({ provinces, cari = {} }) {
             <span className="shrink-0 font-mono text-[10px] text-muted tabular-nums">{region.districts.length} districts</span>
           </div>
           {region.text && (
-            <p className="mt-1 text-justify text-[10.5px] leading-relaxed text-muted">
-              <Highlighted text={region.text} />
-            </p>
+            // Long releases would otherwise stretch the panel; cap the height and
+            // let the wording scroll inside the shared thin scrollbar instead.
+            <div className="mt-1 max-h-[84px] overflow-y-auto cb-scroll">
+              <p className="text-justify text-[10.5px] leading-relaxed text-muted">
+                <Highlighted text={region.text} />
+              </p>
+            </div>
           )}
         </div>
 

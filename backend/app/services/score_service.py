@@ -688,6 +688,184 @@ async def warm_timeline(kind: str) -> dict[str, Any]:
     return status
 
 
+# One background pass per (kind, cycle, day), shared by every poll, like the
+# choropleth. A day pass peaks the CARI across the day's leads and reduces the
+# day's accumulated rain, so it is heavier than a single lead and must not block.
+_extreme_tasks: dict[tuple, asyncio.Task] = {}
+
+
+def _day_label(iso: str) -> str:
+    """'2026-09-11' -> '11 Sep', the dropdown label."""
+    from datetime import date as _date
+
+    d = _date.fromisoformat(iso)
+    return f"{d.day} {d.strftime('%b')}"
+
+
+async def _peak_classes(kind: str, creation_time, day: dict) -> dict[Any, int]:
+    """Peak CARI class per feature across the scoring leads inside a PKT day.
+
+    Reuses the same snapped scoring grid the warm-up caches under (_warm_targets),
+    filtered to the day window, so every lead read is a cache hit once the timeline
+    is warm; a lead not yet cached is computed through the shared _run_choropleth
+    task exactly as the warm-up does. The peak is the worst class the day reaches.
+    """
+    _, snapped_all = await _warm_targets()
+    day_leads = [lead for lead in snapped_all if day["start_lead"] < lead <= day["end_lead"]]
+
+    peak: dict[Any, int] = {}
+    for lead in day_leads:
+        cached = await repositories.cached_choropleth(kind, creation_time, lead)
+        if not cached:
+            cycle_l, _ = await _resolve(lead)
+            key = (kind, cycle_l.creation_time, cycle_l.lead_hours)
+            task = _choropleth_tasks.get(key)
+            if task is None or (task.done() and task.exception() is not None):
+                task = _choropleth_tasks[key] = asyncio.create_task(_run_choropleth(kind, cycle_l))
+            await task
+            cached = await repositories.cached_choropleth(kind, creation_time, cycle_l.lead_hours)
+        if not cached:
+            continue
+        for f in cached["payload"]:
+            k, ci = f["key"], f["classIdx"]
+            if ci > peak.get(k, -1):
+                peak[k] = ci
+    return peak
+
+
+async def _daily_rain(creation_time, day: dict, feats: list[tuple[Any, dict]]) -> dict[Any, float | None]:
+    """Per feature daily accumulated rainfall (mm) over the day window.
+
+    Delegates the accumulation to the raster service (the multi-model ensemble, the
+    one place that logic lives) and reduces the resulting raster over each polygon
+    with a max reducer, matching how the hourly RF variable is reduced. The temp
+    raster is deleted once reduced.
+    """
+    from pathlib import Path
+
+    from app.services import raster_score_service
+
+    path = await raster_score_service.daily_accumulation(
+        creation_time, day["start_lead"], day["end_lead"]
+    )
+    if path is None:
+        return {}
+    try:
+        vals = await run_in_threadpool(zonal.zonal_layer, {"RAIN": str(path)}, feats, {"RAIN": "max"}, None)
+    finally:
+        try:
+            Path(path).unlink()
+        except OSError:
+            pass
+    return {k: v.get("RAIN") for k, v in vals.items()}
+
+
+async def _run_extreme(kind: str, creation_time, day: dict) -> None:
+    """Background body: peak CARI over the day, gated by the day's accumulated rain.
+
+    A region's day class is the peak CARI across the day's leads, then capped to Low
+    where the day's accumulated rainfall falls short of the contract threshold, the
+    same rain-is-the-foundation rule as the per-lead precipitation gate but at a
+    daily scale. Regions at or above minClassIdx are the extreme set the map flashes.
+    """
+    if kind == "district":
+        rows = await repositories.list_district_geometries(_CHOROPLETH_TOLERANCE)
+        feats = [(r["district_name"], r["geometry"]) for r in rows]
+        names = {r["district_name"]: r["district_name"] for r in rows}
+    elif kind == "tehsil":
+        rows = await repositories.list_tehsil_geometries(_CHOROPLETH_TOLERANCE)
+        feats = [(r["tehsil_code"], r["geometry"]) for r in rows]
+        names = {r["tehsil_code"]: r["tehsil"] for r in rows}
+    else:
+        raise NotConfigured("score.cari_extreme", f"unknown extreme-events kind {kind!r}")
+
+    peak = await _peak_classes(kind, creation_time, day)
+    rain = await _daily_rain(creation_time, day, feats)
+
+    ex = contracts.cari()["extremeEvents"]
+    threshold, min_idx = ex["dailyThresholdMm"], ex["minClassIdx"]
+
+    features: list[dict[str, Any]] = []
+    extreme_count = 0
+    for key, _ in feats:
+        cls = peak.get(key, 0)
+        mm = rain.get(key)
+        if mm is None or mm < threshold:
+            cls = min(cls, 1)  # daily-rain gate: no meaningful rain caps to Low
+        is_extreme = cls >= min_idx
+        if is_extreme:
+            extreme_count += 1
+        features.append({
+            "key": key,
+            "name": names.get(key, key),
+            "classIdx": cls,
+            "dailyRainMm": None if mm is None else round(float(mm), 1),
+            "extreme": is_extreme,
+        })
+
+    await repositories.store_extreme(
+        kind, creation_time, day["date"], {"features": features, "extremeCount": extreme_count}
+    )
+
+
+async def extreme_events(kind: str, day_index: int | None) -> dict[str, Any]:
+    """Daily 'Extreme Events' for a layer, for the Convective Alerts panel.
+
+    With no day, returns just the list of upcoming forecast days so the dropdown
+    can populate. With a day, returns the per feature day class and which regions
+    are extreme, cached per (kind, cycle, day); a cold day starts one background
+    pass and reports "computing" until it lands, mirroring the choropleth.
+    """
+    if kind not in ("district", "tehsil"):
+        raise NotConfigured("score.cari_extreme", f"unknown extreme-events kind {kind!r}")
+
+    ex = contracts.cari().get("extremeEvents") or {}
+    if not ex.get("enabled"):
+        return {"kind": kind, "status": "ready", "enabled": False, "days": [], "features": [], "extremeCount": 0}
+
+    cycle, model = await _resolve(0)
+    creation_time = cycle.creation_time
+    cyc = await repositories.latest_cycle(model)
+    published = sorted({int(lead) for lead in (cyc["published_leads"] or [])}) if cyc else []
+    days = timeutil.forecast_days(creation_time, published, ex["maxDays"])
+    day_list = [{"index": d["index"], "date": d["date"], "label": _day_label(d["date"])} for d in days]
+
+    base = {
+        "kind": kind,
+        "enabled": True,
+        "creationTime": creation_time,
+        "days": day_list,
+        "minClassIdx": ex["minClassIdx"],
+        "dailyThresholdMm": ex["dailyThresholdMm"],
+        "classes": contracts.cari()["classes"],
+    }
+
+    if day_index is None or not days or day_index < 0 or day_index >= len(days):
+        return {**base, "status": "ready", "day": None, "features": [], "extremeCount": 0}
+
+    day = days[day_index]
+    day_meta = day_list[day_index]
+
+    cached = await repositories.cached_extreme(kind, creation_time, day["date"])
+    if cached:
+        _extreme_tasks.pop((kind, creation_time, day["date"]), None)
+        payload = cached["payload"]
+        return {**base, "status": "ready", "day": day_meta,
+                "features": payload["features"], "extremeCount": payload["extremeCount"]}
+
+    tkey = (kind, creation_time, day["date"])
+    task = _extreme_tasks.get(tkey)
+    if task is not None and task.done():
+        _extreme_tasks.pop(tkey, None)
+        if task.exception() is not None:
+            raise task.exception()
+        task = None
+    if task is None:
+        _extreme_tasks[tkey] = asyncio.create_task(_run_extreme(kind, creation_time, day))
+
+    return {**base, "status": "computing", "day": day_meta, "features": [], "extremeCount": 0}
+
+
 def _envelope(cycle, district, matrix, cached, from_cache=False) -> dict[str, Any]:
     classes = contracts.cari()["classes"]
     cls = classes[cached["class_idx"]]

@@ -145,7 +145,7 @@ export default function ForecastChartPanel ({
 // A themed dropdown matching the model/level selectors in the layers panel: a
 // bordered trigger with an uppercase tag and the current value, and a menu
 // rendered in a portal so the panel's own scroll and overflow never clip it.
-function ThemedSelect ({ tag, ariaLabel, value, options, onChange, className = '' }) {
+export function ThemedSelect ({ tag, ariaLabel, value, options, onChange, className = '' }) {
   const [open, setOpen] = useState(false)
   const [rect, setRect] = useState(null)
   const btnRef = useRef(null)
@@ -190,8 +190,8 @@ function ThemedSelect ({ tag, ariaLabel, value, options, onChange, className = '
           open ? 'border-primary bg-primary-soft' : 'border-border bg-panel-2 hover:border-border-strong'
         }`}
       >
-        <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted">{tag}</span>
-        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-text">{current?.label}</span>
+        <span className="shrink-0 leading-none text-[9px] font-semibold uppercase tracking-[0.08em] text-muted">{tag}</span>
+        <span className="min-w-0 flex-1 truncate leading-none text-[12.5px] font-semibold text-text">{current?.label}</span>
         <TbChevronDown className={`shrink-0 text-[13px] text-muted transition-transform duration-200 ${open ? 'rotate-180' : ''}`} aria-hidden />
       </button>
 

@@ -23,8 +23,9 @@ import { mapboxToken, styleUrl } from '@/lib/basemaps'
 import {
   DEFAULT_CENTER, DEFAULT_ZOOM,
   addRadarImage, addRasterLayer, addVectorLayer, applyLayerOrder, applyVectorStyle, ALERT_OUTLINE_ID,
+  EXTREME_OUTLINE_ID,
   layerIdsFor, paintByScore, raiseSelectionOutlines, removeRadarImage, removeRasterLayer, resetPaint,
-  setAlertOutline, setLayerOpacity, setLayerVisible, setRasterOpacity, setRasterTime
+  setAlertOutline, setExtremeOutline, setLayerOpacity, setLayerVisible, setRasterOpacity, setRasterTime
 } from '@/lib/map'
 import { removeWindBarbs, setWindBarbs } from '@/lib/windBarbs'
 
@@ -59,6 +60,9 @@ export default function MapView ({
   radarOverlays = [],
   radarRingColor,
   alertDistrictCodes = [],
+  extremeKeys = [],
+  extremeLayerId = null,
+  extremeKeyField = null,
   selection = null,
   layerOrder = null,
   onIdentify,
@@ -160,6 +164,7 @@ export default function MapView ({
       radarOnMapRef.current = new Set()
       applyRadarRef.current?.()
       applyAlertRef.current?.()
+      applyExtremeRef.current?.()
       setReady(true)
       onMapReady?.(map)
     })
@@ -571,6 +576,42 @@ export default function MapView ({
       if (alertRafRef.current) { cancelAnimationFrame(alertRafRef.current); alertRafRef.current = null }
     }
   }, [ready, layers, alertDistrictCodes])
+
+  // ---------------------------------------------------------- extreme events
+  //
+  // The districts or tehsils that are extreme for the chosen forecast day, flashed
+  // the same way as the advisory alert but on whichever CARI layer is active and
+  // keyed by that layer's join field. Independent of the timeline slider: it is
+  // driven purely by the selected day's result. Stashed for style.load re-add.
+  const applyExtremeRef = useRef(null)
+  const extremeRafRef = useRef(null)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    const def = extremeLayerId ? layers.find((l) => l.id === extremeLayerId) : null
+    const apply = () => setExtremeOutline(mapRef.current, def, extremeKeys, extremeKeyField)
+    applyExtremeRef.current = apply
+    apply()
+
+    if (extremeRafRef.current) { cancelAnimationFrame(extremeRafRef.current); extremeRafRef.current = null }
+    if (def && extremeKeys.length) {
+      const start = performance.now()
+      const tick = (t) => {
+        const m = mapRef.current
+        if (!m) return
+        if (m.getLayer(EXTREME_OUTLINE_ID)) {
+          const phase = (Math.sin((t - start) / 500) + 1) / 2
+          m.setPaintProperty(EXTREME_OUTLINE_ID, 'line-width', 1.8 + phase * 1.6)
+          m.setPaintProperty(EXTREME_OUTLINE_ID, 'line-opacity', 0.6 + phase * 0.4)
+        }
+        extremeRafRef.current = requestAnimationFrame(tick)
+      }
+      extremeRafRef.current = requestAnimationFrame(tick)
+    }
+    return () => {
+      if (extremeRafRef.current) { cancelAnimationFrame(extremeRafRef.current); extremeRafRef.current = null }
+    }
+  }, [ready, layers, extremeKeys, extremeLayerId, extremeKeyField])
 
   // ------------------------------------------------------------- layer order
   //

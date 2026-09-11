@@ -714,6 +714,49 @@ async def store_choropleth(
     )
 
 
+async def cached_extreme(feature_kind: str, creation_time, day_date: str) -> dict | None:
+    """The cached Extreme Events payload for a (kind, cycle, day), or None.
+
+    Same jsonb-as-text handling as the choropleth cache. day_date is the PKT
+    calendar date the payload was computed for.
+    """
+    row = await pool.fetchrow(
+        """
+        SELECT payload, feature_count, computed_at
+        FROM score.cari_extreme
+        WHERE feature_kind = $1 AND creation_time = $2 AND day_date = $3
+        """,
+        feature_kind,
+        creation_time,
+        day_date,
+    )
+    if row is None:
+        return None
+    out = dict(row)
+    if isinstance(out["payload"], str):
+        out["payload"] = json.loads(out["payload"])
+    return out
+
+
+async def store_extreme(feature_kind: str, creation_time, day_date: str, payload: dict) -> None:
+    await pool.execute(
+        """
+        INSERT INTO score.cari_extreme
+            (feature_kind, creation_time, day_date, payload, feature_count)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (feature_kind, creation_time, day_date)
+        DO UPDATE SET payload = EXCLUDED.payload,
+                      feature_count = EXCLUDED.feature_count,
+                      computed_at = now()
+        """,
+        feature_kind,
+        creation_time,
+        day_date,
+        json.dumps(payload),
+        len(payload.get("features", [])),
+    )
+
+
 async def alerts_for(target_date) -> list[dict[str, Any]]:
     rows = await pool.fetch(
         """

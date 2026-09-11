@@ -80,3 +80,6 @@ docs/*.docx
 # obs.event_photos), so the database is the copy that matters. Reload with
 # scripts/ingest/ingest_events.py.
 docs/historical_data/
+
+# Portfolio content staging (not part of the codebase)
+incoming/

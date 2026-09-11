@@ -307,6 +307,7 @@ def _card(cycle, identity: dict, matrix_auto: bool, result, fallback: dict) -> d
         "riskLevel": result.risk_level,
         "riskColor": result.risk_color,
         "overrideApplied": result.override_applied,
+        "precipGated": result.precip_gated,
         "classes": contracts.cari()["classes"],
     }
 

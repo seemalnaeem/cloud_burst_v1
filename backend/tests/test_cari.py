@@ -135,3 +135,51 @@ def test_unknown_matrix_is_rejected():
     values = {v["key"]: None for v in cari.variable_specs()}
     with pytest.raises(ValueError, match="Unknown matrix"):
         cari.score(values, "mountains")
+
+
+# A dry district with strong convective ingredients: the Khuzdar/Chagai case, high
+# CAPE and moisture and lift but no forecast rain. Five primaries grade 5, so the
+# extreme override alone would floor it High; the precipitation gate must cap it.
+_DRY_HIGH = {
+    "CAPE": 2200, "TCWV": 52, "RH700": 96, "VV700": -2.0, "ELEV": 2500,
+}
+
+
+def test_precip_gate_caps_a_dry_high_ingredient_district():
+    values = {**{v["key"]: None for v in cari.variable_specs()}, **_DRY_HIGH, "RF": 0.2}
+    result = cari.score(values, "terrain")
+
+    assert result.precip_gated is True
+    assert result.class_idx == 1
+    assert result.risk_level == "Low"
+    assert result.cari <= 30.0
+    # The raw convective sum is untouched, only the final class and percentage are
+    # gated, so the drill-down can still show what the ingredients earned.
+    assert result.cas == pytest.approx(25.0)
+
+
+def test_precip_gate_caps_when_rainfall_is_missing():
+    values = {**{v["key"]: None for v in cari.variable_specs()}, **_DRY_HIGH}  # RF is None
+    result = cari.score(values, "terrain")
+    assert result.precip_gated is True
+    assert result.class_idx == 1
+
+
+def test_precip_gate_does_not_fire_when_rain_is_forecast():
+    """Same ingredients, but with rain at or above the threshold the class stands.
+    The gate reads the raw rate, not the RF grade, so a rate that grades 0 still
+    clears the gate."""
+    values = {**{v["key"]: None for v in cari.variable_specs()}, **_DRY_HIGH, "RF": 5.0}
+    result = cari.score(values, "terrain")
+    assert result.precip_gated is False
+    assert result.class_idx >= 4
+
+
+def test_precip_gate_only_lowers_never_raises():
+    """A genuinely low district with no rain stays where it is and is not flagged
+    as gated, since the gate had nothing to cap."""
+    values = {v["key"]: None for v in cari.variable_specs()}
+    result = cari.score(values, "lowlands")
+    assert result.precip_gated is False
+    assert result.class_idx == 0
+    assert result.risk_level == "Very Low"

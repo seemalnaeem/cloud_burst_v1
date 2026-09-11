@@ -19,6 +19,7 @@ from app.shared import contracts
 _C = contracts.cari()
 _VARS = {v["key"]: v for v in _C["variables"]}
 _ORDER = [v["key"] for v in _C["variables"]]
+_GATE = _C.get("precipitationGate") or {}
 
 
 def _normalize(text: str | None) -> str:
@@ -129,6 +130,18 @@ def score_grid(arrays: dict[str, np.ndarray], terrain_mask: np.ndarray) -> np.nd
         floor = np.where((floor == 0) & (extreme_count >= rule["countAtLeast"]), lower, floor)
     percent = np.maximum(percent, floor)
 
+    # Precipitation gate, per pixel: the same rule the scalar path applies. Where
+    # the forecast rainfall rate is below the contract threshold or absent, cap the
+    # cell to the gate class ceiling so dry cells never render as elevated risk.
+    if _GATE.get("enabled"):
+        rf = arrays.get(_GATE["variable"])
+        ceiling = float(classes[_GATE["capClassIdx"]]["max"])
+        if rf is None:
+            percent = np.minimum(percent, ceiling)
+        else:
+            dry = np.isnan(rf) | (rf < _GATE["thresholdMmHr"])
+            percent = np.where(dry, np.minimum(percent, ceiling), percent)
+
     return np.clip(percent, 0, 100).astype("float32")
 
 
@@ -163,6 +176,28 @@ def classify(percent: float) -> dict:
     return _C["classes"][-1]
 
 
+def _apply_precip_gate(percent: float, class_idx: int, rf: float | None) -> tuple[float, int, bool]:
+    """Cap the class and percentage when rain is not forecast.
+
+    The gate expresses the rule that convective ingredients only become risk where
+    rain will actually fall. When RF (the region's peak rainfall rate, already
+    reduced) is below the contract threshold or missing, the class is capped at
+    capClassIdx and the percentage to that class's ceiling. It only ever lowers, so
+    a rainy region keeps whatever the ingredients earned it. Returns the possibly
+    capped percent and class plus whether the gate lowered the class.
+    """
+    if not _GATE.get("enabled"):
+        return percent, class_idx, False
+
+    if rf is not None and rf >= _GATE["thresholdMmHr"]:
+        return percent, class_idx, False
+
+    cap = _GATE["capClassIdx"]
+    ceiling = _C["classes"][cap]["max"]
+    gated = class_idx > cap
+    return min(percent, float(ceiling)), min(class_idx, cap), gated
+
+
 @dataclass
 class CariResult:
     matrix: str
@@ -177,6 +212,7 @@ class CariResult:
     risk_level: str = ""
     risk_color: str = ""
     override_applied: bool = False
+    precip_gated: bool = False
 
 
 def score(values: dict[str, float | None], matrix: str) -> CariResult:
@@ -234,6 +270,15 @@ def score(values: dict[str, float | None], matrix: str) -> CariResult:
             override_applied = True
             break
 
+    # Precipitation gate. Rain is the foundation of the index: the convective
+    # ingredients only count where rain is actually forecast. If the region's peak
+    # rainfall rate (RF, already reduced here) is below the contract threshold, or
+    # RF is missing entirely, the class is capped no matter how strong everything
+    # else grades. Runs after the override so a dry, high-CAPE district cannot be
+    # floored high. cas is left untouched, so the drill-down still shows the raw
+    # convective sum; only the final class and percentage are gated.
+    percent, class_idx, precip_gated = _apply_precip_gate(percent, class_idx, values.get(_GATE.get("variable")))
+
     final = _C["classes"][class_idx]
 
     return CariResult(
@@ -249,6 +294,7 @@ def score(values: dict[str, float | None], matrix: str) -> CariResult:
         risk_level=final["name"],
         risk_color=final["color"],
         override_applied=override_applied,
+        precip_gated=precip_gated,
     )
 
 

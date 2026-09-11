@@ -523,6 +523,13 @@
       }
     ]
   },
+  "precipitationGate": {
+    "$comment": "Precipitation is the foundation of the index: convective ingredients only translate to risk where rain is actually forecast. After the class is decided (including the primaryExtremeOverride), if the region's peak forecast rainfall rate (the RF variable, the differenced mm/hr precipitation the scorer already reads) is below thresholdMmHr, or RF is missing entirely, the class is capped at capClassIdx and the reported percentage is capped to that class's ceiling. It runs last so a dry, high-CAPE district cannot be floored high by the override. Applies identically to the district and tehsil choropleth, the drill-down, the alerts feed and the per-pixel CARI raster, because all of them score through cari.py. Set enabled false to score without the gate. thresholdMmHr and capClassIdx are the only knobs; capClassIdx indexes classes[].",
+    "enabled": true,
+    "variable": "RF",
+    "thresholdMmHr": 1.0,
+    "capClassIdx": 1
+  },
   "alerts": {
     "$comment": "Districts at or above this class index enter the alert feed.",
     "minClassIdx": 4,

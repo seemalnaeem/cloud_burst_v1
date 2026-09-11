@@ -143,7 +143,7 @@ export default function AlertsPanel ({
       title="Convective Alerts"
       icon={TbAlertTriangle}
       accent={ALERT_RED}
-      className="flex h-[min(560px,calc(100vh-5.5rem))] w-[min(360px,calc(100vw-2rem))] flex-col"
+      className="flex max-h-[calc(100vh-5.5rem)] w-[min(360px,calc(100vw-2rem))] flex-col"
       bodyClassName="py-3"
       actions={has
         ? (
